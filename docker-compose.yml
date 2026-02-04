@@ -1,0 +1,16 @@
+services:
+  war-chat:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - DATA_DIR=/data
+    volumes:
+      - ./data:/data
+    healthcheck:
+      test: ["CMD", "/war-chat", "-healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s

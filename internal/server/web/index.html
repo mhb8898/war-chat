@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>War Chat</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💬</text></svg>">
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      display: flex;
+      flex-direction: column;
+    }
+    .app {
+      max-width: 100%;
+      margin: 0 auto;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .layout-split {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+    }
+    .sidebar {
+      width: 280px;
+      min-width: 200px;
+      flex-shrink: 0;
+      border-right: 1px solid #0f3460;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .sidebar .chat-list { flex: 1; overflow-y: auto; min-height: 0; }
+    .content-area {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+    }
+    #chat-pane {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+    }
+    #chat-pane > .input-bar {
+      flex-shrink: 0;
+    }
+    @media (max-width: 768px) {
+      .layout-split .sidebar {
+        width: 100%;
+        min-width: 0;
+      }
+      .layout-split.has-chat .sidebar {
+        display: none;
+      }
+      .layout-split:not(.has-chat) .content-area {
+        display: none;
+      }
+      .new-chat-form { display: none; }
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1rem;
+      background: #16213e;
+      border-bottom: 1px solid #0f3460;
+      flex-shrink: 0;
+    }
+    .header h1 {
+      margin: 0;
+      font-size: 1.25rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      min-width: 0;
+      flex: 1;
+    }
+    .header-actions { display: flex; gap: 0.5rem; align-items: center; flex-shrink: 0; }
+    .btn-icon {
+      background: none;
+      border: none;
+      color: #eee;
+      cursor: pointer;
+      padding: 0.5rem;
+      font-size: 1.25rem;
+    }
+    .btn-icon:hover { opacity: 0.8; }
+    .main { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+    .view { display: none; flex-direction: column; height: 100%; }
+    .view.active { display: flex !important; }
+    .view:not(.active) { display: none !important; }
+    .view-setup, .view-profile { padding: 1.5rem; flex: 1; }
+    .view-profile { min-height: 0; overflow-y: auto; width: 100%; }
+    body.profile-active .view-main { display: none !important; }
+    .view-main { padding: 0; display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
+    .view-main .layout-split { flex: 1; min-height: 0; }
+    input, button, textarea {
+      padding: 0.75rem;
+      margin: 0.25rem 0;
+      border: 1px solid #0f3460;
+      border-radius: 6px;
+      background: #0f3460;
+      color: #eee;
+      font-size: 1rem;
+    }
+    button {
+      cursor: pointer;
+      background: #e94560;
+      border: none;
+      font-weight: 600;
+    }
+    button:hover { background: #ff6b6b; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .chat-list { list-style: none; margin: 0; padding: 0; }
+    .chat-row {
+      display: flex;
+      align-items: center;
+      padding: 1rem;
+      border-bottom: 1px solid #0f3460;
+      cursor: pointer;
+    }
+    .chat-row:hover { background: #16213e; }
+    .chat-row.selected {
+      background: #16213e;
+      border-left: 3px solid #e94560;
+    }
+    .chat-row.selected .chat-name {
+      font-weight: 700;
+      color: #fff;
+    }
+    .chat-row.selected .chat-preview {
+      opacity: 1;
+      color: #e0e0e0;
+    }
+    .chat-avatar {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: #0f3460;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-right: 1rem;
+      font-size: 1.25rem;
+    }
+    .chat-info { flex: 1; min-width: 0; }
+    .chat-name {
+      font-weight: 600;
+      margin-bottom: 0.25rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .chat-preview {
+      font-size: 0.875rem;
+      opacity: 0.8;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      text-align: left;
+    }
+    .chat-time { font-size: 0.75rem; opacity: 0.7; }
+    .empty-state {
+      padding: 2rem;
+      text-align: center;
+      opacity: 0.8;
+    }
+    #messages {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      overflow-x: hidden;
+      -webkit-overflow-scrolling: touch;
+      padding: 1rem;
+    }
+    #messages .messages-inner {
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      gap: 0.5rem;
+      min-height: min-content;
+    }
+    .msg {
+      padding: 0.5rem 0.75rem;
+      border-radius: 12px;
+      max-width: 85%;
+      flex-shrink: 0;
+    }
+    .msg.sent {
+      align-self: flex-end;
+      background: #e94560;
+    }
+    .msg.received {
+      align-self: flex-start;
+      background: #16213e;
+    }
+    .msg.note {
+      align-self: flex-start;
+      background: #0f3460;
+      max-width: 90%;
+    }
+    .msg .meta { font-size: 0.7rem; opacity: 0.8; }
+    .msg .msg-code {
+      margin: 0.25rem 0;
+      padding: 0.5rem;
+      background: rgba(0,0,0,0.2);
+      border-radius: 6px;
+      font-family: ui-monospace, monospace;
+      font-size: 0.9em;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .input-bar {
+      display: flex;
+      gap: 0.5rem;
+      padding: 1rem;
+      background: #16213e;
+      border-top: 1px solid #0f3460;
+      flex-shrink: 0;
+    }
+    .input-bar input { flex: 1; margin: 0; }
+    .input-bar #messageInput {
+      flex: 1;
+      margin: 0;
+      resize: none;
+      min-height: 2.5rem;
+      max-height: 8rem;
+    }
+    .input-bar button { width: auto; }
+    .link-box {
+      background: #0f3460;
+      padding: 0.75rem;
+      border-radius: 6px;
+      margin: 0.5rem 0;
+      word-break: break-all;
+      font-family: monospace;
+      font-size: 0.875rem;
+    }
+    #qrcode { margin: 1rem 0; }
+    .new-chat-form {
+      padding: 1rem;
+      flex-shrink: 0;
+      border-bottom: 1px solid #0f3460;
+    }
+    .hidden { display: none !important; }
+    header.hidden { display: none !important; }
+    .new-chat-modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+    }
+    .new-chat-modal.visible {
+      display: flex;
+    }
+    .new-chat-modal .modal-inner {
+      background: #16213e;
+      border: 1px solid #0f3460;
+      border-radius: 8px;
+      padding: 1.5rem;
+      width: 100%;
+      max-width: 320px;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+    .new-chat-modal .modal-inner input { margin: 0; }
+    .new-chat-modal .modal-inner .modal-actions { display: flex; gap: 0.5rem; justify-content: flex-end; }
+    .new-chat-modal .modal-inner { max-height: 80vh; }
+    .user-list { list-style: none; padding: 0; margin: 0; max-height: 240px; overflow-y: auto; }
+    .user-list li {
+      padding: 0.75rem 1rem;
+      cursor: pointer;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .user-list li:hover { background: #0f3460; }
+    .user-list .user-avatar { width: 36px; height: 36px; border-radius: 50%; background: #0f3460; display: flex; align-items: center; justify-content: center; font-weight: bold; flex-shrink: 0; }
+    .user-list .user-name { flex: 1; }
+    .user-list-empty { padding: 1rem; text-align: center; opacity: 0.8; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="header" id="header">
+      <h1>War Chat</h1>
+      <div class="header-actions" id="headerActions"></div>
+    </header>
+
+    <main class="main">
+      <!-- Setup / Login -->
+      <div id="view-setup" class="view view-setup">
+        <h2>Welcome</h2>
+        <div id="setup-passkey-div">
+          <p>Sign in or create account with passkey:</p>
+          <button id="btnSignInPasskey">Sign in with passkey</button>
+          <button id="btnUsePasskey">Create passkey</button>
+        </div>
+        <div id="setup-mnemonic">
+          <p style="margin:1rem 0 0.5rem;opacity:0.8">Or use 12-word recovery phrase:</p>
+          <textarea id="mnemonic" placeholder="word1 word2 word3 ..." rows="3"></textarea>
+          <button id="btnGenerate">Generate new identity</button>
+          <button id="btnContinue">Continue</button>
+        </div>
+        <div id="setup-register" class="hidden">
+          <h2>Choose username</h2>
+          <p id="setup-register-passkey-hint" class="hidden" style="opacity:0.8;font-size:0.9rem">Enter username, then create passkey. This name will appear when switching between profiles.</p>
+          <input type="text" id="username" placeholder="Username" maxlength="32">
+          <button id="btnRegister">Register</button>
+          <button id="btnCreatePasskey" class="hidden">Create passkey</button>
+        </div>
+      </div>
+
+      <!-- Chats + Chat (split layout when logged in) -->
+      <div id="view-main" class="view view-main">
+        <div class="layout-split" id="layoutSplit">
+          <aside class="sidebar">
+            <div class="new-chat-form">
+              <button id="btnNewChat" style="width:100%">New chat</button>
+            </div>
+            <ul id="chat-list" class="chat-list"></ul>
+            <div id="chat-list-empty" class="empty-state hidden">
+              No chats yet. Start a new chat above.
+            </div>
+          </aside>
+          <div class="content-area">
+            <div id="chat-pane" class="view-chat">
+              <div id="messages"><div class="messages-inner"></div></div>
+              <div class="input-bar">
+                <textarea id="messageInput" placeholder="Type a message..." rows="1"></textarea>
+                <button id="btnSend">Send</button>
+              </div>
+            </div>
+            <div id="chat-empty" class="empty-state" style="flex:1;display:flex;align-items:center;justify-content:center;">
+              Select a chat or start a new one
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Profile -->
+      <div id="view-profile" class="view view-profile">
+        <h2>Profile</h2>
+        <p><strong>Username:</strong> <span id="profileUsername"></span></p>
+        <p>Share this link so others can message you:</p>
+        <div class="link-box" id="chatLink"></div>
+        <button id="btnCopyLink">Copy link</button>
+        <div id="qrcode"></div>
+        <hr>
+        <h3>Recovery phrase</h3>
+        <div id="profile-recovery-section">
+          <p>Your 12-word phrase. Save it to restore on another device.</p>
+          <button id="btnShowMnemonic">Show recovery phrase</button>
+          <div id="mnemonicDisplay" class="link-box hidden"></div>
+        </div>
+        <div id="profile-passkey-section" class="hidden">
+          <p>You use a passkey. Add a recovery phrase for backup?</p>
+          <button id="btnAddRecoveryPhrase">Add recovery phrase as backup</button>
+        </div>
+        <div id="profile-add-passkey-section" class="hidden">
+          <p>Add passkey for easier sign-in on this device.</p>
+          <button id="btnAddPasskey">Add passkey</button>
+        </div>
+        <hr>
+        <h3>Use on another device</h3>
+        <p>Export backup (encrypted). On the new device, enter your phrase and restore.</p>
+        <button id="btnExportBackup">Export backup</button>
+        <p>Restore: enter your 12-word phrase and paste the backup:</p>
+        <textarea id="restoreBackup" placeholder="Paste backup here" rows="2"></textarea>
+        <button id="btnRestoreBackup">Restore from backup</button>
+      </div>
+    </main>
+  </div>
+
+  <div id="newChatModal" class="new-chat-modal">
+    <div class="modal-inner">
+      <label for="newChatSearchModal">Search users</label>
+      <input type="text" id="newChatSearchModal" placeholder="Type to search..." maxlength="64" autocomplete="off">
+      <ul id="newChatUserList" class="user-list"></ul>
+      <div id="newChatUserListEmpty" class="user-list-empty hidden">No users found</div>
+      <div class="modal-actions">
+        <button id="btnNewChatModalCancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="qrcode.min.js"></script>
+  <script src="wordlist.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
