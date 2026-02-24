@@ -226,7 +226,7 @@ func (s *Store) ListGroupsForUser(username string) ([]*Group, error) {
 			}
 		}
 	}
-  return out, nil
+	return out, nil
 }
 
 // DeleteGroup removes a group by id.
