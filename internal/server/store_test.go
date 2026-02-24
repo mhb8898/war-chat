@@ -236,3 +236,135 @@ func TestStore_pathValidation(t *testing.T) {
 		t.Errorf("GetOffline(invalid recipient): expected nil, got %v", msgs)
 	}
 }
+
+func TestNewStore_createsGroupsDir(t *testing.T) {
+	dir := t.TempDir()
+
+	_, err := NewStore(dir)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	groupsDir := filepath.Join(dir, "groups")
+	if _, err := os.Stat(groupsDir); os.IsNotExist(err) {
+		t.Errorf("NewStore should create groups dir at %s", groupsDir)
+	}
+}
+
+func TestStore_CreateGroup_GetGroup_UpdateGroupMembers_ListGroupsForUser_DeleteGroup(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	if err := store.CreateGroup("g1", "Team", []string{"alice", "bob"}, "alice"); err != nil {
+		t.Fatalf("CreateGroup: %v", err)
+	}
+
+	g, err := store.GetGroup("g1")
+	if err != nil {
+		t.Fatalf("GetGroup: %v", err)
+	}
+	if g == nil {
+		t.Fatal("GetGroup: expected group, got nil")
+	}
+	if g.ID != "g1" || g.Name != "Team" || g.CreatedBy != "alice" {
+		t.Errorf("GetGroup: got %+v", g)
+	}
+	if !reflect.DeepEqual(g.Members, []string{"alice", "bob"}) {
+		t.Errorf("GetGroup Members: got %v", g.Members)
+	}
+
+	list, err := store.ListGroupsForUser("alice")
+	if err != nil {
+		t.Fatalf("ListGroupsForUser: %v", err)
+	}
+	if len(list) != 1 || list[0].ID != "g1" {
+		t.Errorf("ListGroupsForUser(alice): got %v", list)
+	}
+	list, _ = store.ListGroupsForUser("bob")
+	if len(list) != 1 {
+		t.Errorf("ListGroupsForUser(bob): got %v", list)
+	}
+	list, _ = store.ListGroupsForUser("charlie")
+	if len(list) != 0 {
+		t.Errorf("ListGroupsForUser(charlie): expected empty, got %v", list)
+	}
+
+	if err := store.UpdateGroupMembers("g1", []string{"alice", "bob", "charlie"}); err != nil {
+		t.Fatalf("UpdateGroupMembers: %v", err)
+	}
+	g, _ = store.GetGroup("g1")
+	if len(g.Members) != 3 {
+		t.Errorf("after UpdateGroupMembers: got %v", g.Members)
+	}
+
+	if err := store.DeleteGroup("g1"); err != nil {
+		t.Fatalf("DeleteGroup: %v", err)
+	}
+	g, err = store.GetGroup("g1")
+	if err != nil {
+		t.Fatalf("GetGroup after delete: %v", err)
+	}
+	if g != nil {
+		t.Errorf("GetGroup after DeleteGroup: expected nil, got %+v", g)
+	}
+}
+
+func TestStore_CreateGroup_duplicateFails(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	if err := store.CreateGroup("g1", "A", []string{"alice"}, "alice"); err != nil {
+		t.Fatalf("CreateGroup: %v", err)
+	}
+	err = store.CreateGroup("g1", "B", []string{"bob"}, "bob")
+	if err == nil {
+		t.Fatal("second CreateGroup with same id should fail")
+	}
+}
+
+func TestStore_UpdateGroupMembers_emptyRemovesGroup(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	_ = store.CreateGroup("g1", "A", []string{"alice"}, "alice")
+	if err := store.UpdateGroupMembers("g1", []string{}); err != nil {
+		t.Fatalf("UpdateGroupMembers empty: %v", err)
+	}
+	g, err := store.GetGroup("g1")
+	if err != nil {
+		t.Fatalf("GetGroup: %v", err)
+	}
+	if g != nil {
+		t.Errorf("after UpdateGroupMembers empty: expected nil, got %+v", g)
+	}
+}
+
+func TestStore_QueueOfflineWithMeta_GetOffline_returnsMeta(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	meta := map[string]interface{}{"type": "group_invite", "groupId": "g1"}
+	if err := store.QueueOfflineWithMeta("bob", "inv1", "alice", "payload", "nonce", 1000, meta); err != nil {
+		t.Fatalf("QueueOfflineWithMeta: %v", err)
+	}
+
+	msgs, err := store.GetOffline("bob")
+	if err != nil {
+		t.Fatalf("GetOffline: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("GetOffline: got %d messages", len(msgs))
+	}
+	m := msgs[0]
+	if m["type"] != "group_invite" || m["groupId"] != "g1" {
+		t.Errorf("GetOffline meta: got type=%v groupId=%v", m["type"], m["groupId"])
+	}
+}
