@@ -362,6 +362,7 @@ async function createGroup() {
       ws.send(JSON.stringify({ type: 'group_invite', to: member, groupId, payload, nonce }));
     } catch (e) {
       console.error('Failed to send invite to ' + member, e);
+      alert(`Group created, but "${member}" could not be invited (user not found). They must register first.`);
     }
   }
 
@@ -1695,6 +1696,10 @@ async function handleGroupInvite(msg) {
         mySenderKeyB64: null,
         senderKeys: bundle.senderKeys || {},
       });
+      if (typeof alert === 'function') {
+        alert(`${msg.from} added you to the group "${bundle.name}". Check your chat list.`);
+      }
+      maybeNotify(msg.from, 'Added you to group: ' + bundle.name);
     } else if (existing && bundle.senderKeys) {
       existing.senderKeys = existing.senderKeys || {};
       Object.assign(existing.senderKeys, bundle.senderKeys);
@@ -1770,41 +1775,50 @@ async function sendMessage() {
       alert('Group not found');
       return;
     }
-    let senderKey = null;
-    if (group.mySenderKeyB64) {
-      senderKey = await importSenderKeyFromBase64(group.mySenderKeyB64);
-    } else {
-      const { key, raw } = await generateSenderKeyRaw();
-      senderKey = key;
-      group.mySenderKeyB64 = arrayBufferToBase64(raw);
-      group.senderKeys = group.senderKeys || {};
-      group.senderKeys[currentUsername] = group.mySenderKeyB64;
-      await saveGroup(group);
-      for (const member of group.members) {
-        if (member === currentUsername) continue;
-        try {
-          const pubkeyB64 = await getRecipientPubkey(member);
-          const pub = await importPubkeyFromBase64(pubkeyB64);
-          const sharedKey = await deriveSharedKey(keys.privateKey, pub);
-          const bundle = { groupId, senderKeys: { [currentUsername]: group.mySenderKeyB64 } };
-          const plaintext = JSON.stringify(bundle);
-          const { ciphertext, iv } = await encrypt(plaintext, sharedKey);
-          const payload = btoa(String.fromCharCode.apply(null, new Uint8Array(ciphertext)));
-          const nonce = btoa(String.fromCharCode.apply(null, new Uint8Array(iv)));
-          ws.send(JSON.stringify({ type: 'group_invite', to: member, groupId, payload, nonce }));
-        } catch (e) {
-          console.error('Failed to send sender key to ' + member, e);
+    try {
+      let senderKey = null;
+      if (group.mySenderKeyB64) {
+        senderKey = await importSenderKeyFromBase64(group.mySenderKeyB64);
+      } else {
+        const { key, raw } = await generateSenderKeyRaw();
+        senderKey = key;
+        group.mySenderKeyB64 = arrayBufferToBase64(raw);
+        group.senderKeys = group.senderKeys || {};
+        group.senderKeys[currentUsername] = group.mySenderKeyB64;
+        await saveGroup(group);
+        const failedMembers = [];
+        for (const member of group.members) {
+          if (member === currentUsername) continue;
+          try {
+            const pubkeyB64 = await getRecipientPubkey(member);
+            const pub = await importPubkeyFromBase64(pubkeyB64);
+            const sharedKey = await deriveSharedKey(keys.privateKey, pub);
+            const bundle = { groupId, senderKeys: { [currentUsername]: group.mySenderKeyB64 } };
+            const plaintext = JSON.stringify(bundle);
+            const { ciphertext, iv } = await encrypt(plaintext, sharedKey);
+            const payload = btoa(String.fromCharCode.apply(null, new Uint8Array(ciphertext)));
+            const nonce = btoa(String.fromCharCode.apply(null, new Uint8Array(iv)));
+            ws.send(JSON.stringify({ type: 'group_invite', to: member, groupId, payload, nonce }));
+          } catch (e) {
+            console.error('Failed to send sender key to ' + member, e);
+            failedMembers.push(member);
+          }
+        }
+        if (failedMembers.length > 0) {
+          alert('Message will be sent, but these members could not receive your key (ask them to register first): ' + failedMembers.join(', '));
         }
       }
+      const { ciphertext, iv } = await encrypt(text, senderKey);
+      const payload = btoa(String.fromCharCode.apply(null, new Uint8Array(ciphertext)));
+      const nonce = btoa(String.fromCharCode.apply(null, new Uint8Array(iv)));
+      ws.send(JSON.stringify({ type: 'group_send', groupId, payload, nonce }));
+      await saveMessage(m);
+      renderMessage(m, false);
+      input.value = '';
+      renderChatList(getSelectedPeerFromRoute());
+    } catch (e) {
+      alert('Group send failed: ' + e.message);
     }
-    const { ciphertext, iv } = await encrypt(text, senderKey);
-    const payload = btoa(String.fromCharCode.apply(null, new Uint8Array(ciphertext)));
-    const nonce = btoa(String.fromCharCode.apply(null, new Uint8Array(iv)));
-    ws.send(JSON.stringify({ type: 'group_send', groupId, payload, nonce }));
-    await saveMessage(m);
-    renderMessage(m, false);
-    input.value = '';
-    renderChatList(getSelectedPeerFromRoute());
     return;
   }
 
