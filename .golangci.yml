@@ -1,0 +1,18 @@
+# Minimal config for CI: keep code clean without noisy style rules.
+# See https://golangci-lint.run/docs/configuration/
+version: "2"
+
+linters:
+  disable-all: true
+  enable:
+    - govet
+    - errcheck
+    - staticcheck
+    - goimports
+
+linters-settings:
+  goimports:
+    local-prefixes: github.com/war-chat/war-chat
+
+run:
+  timeout: 5m

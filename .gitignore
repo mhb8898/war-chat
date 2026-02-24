@@ -29,5 +29,5 @@ Thumbs.db
 /dist/
 /build/
 data/
-server
-war-chat
+/server
+/war-chat
