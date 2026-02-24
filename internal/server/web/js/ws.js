@@ -205,7 +205,9 @@ export async function sendMessage(text) {
   const keys = state.keys;
   const ws = state.ws;
 
-  if (!text || !text.trim() || !currentRecipient || !keys) return null;
+  if (!text || !text.trim() || !currentRecipient || !keys) {
+    return null;
+  }
 
   const isSelf = currentRecipient === currentUsername;
   const isGroup = groups.isGroupPeer(currentRecipient);
@@ -223,7 +225,9 @@ export async function sendMessage(text) {
     return { message: m, isNoteToSelf: true, refreshChatList: true };
   }
 
-  if (!ws || ws.readyState !== WebSocket.OPEN) return null;
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    return null;
+  }
 
   if (isGroup) {
     const groupId = groups.groupPeerId(currentRecipient);

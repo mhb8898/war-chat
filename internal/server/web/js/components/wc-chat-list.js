@@ -62,7 +62,9 @@ customElements.define('war-chat-chat-list', class WarChatChatList extends HTMLEl
         </div>
         <div class="chat-time">${formatTime(c.lastTs)}</div>
       `;
-      li.onclick = () => this.dispatchEvent(new CustomEvent('war-chat-select-peer', { detail: { peer: navParam }, bubbles: true }));
+      li.onclick = () => {
+        this.dispatchEvent(new CustomEvent('war-chat-select-peer', { detail: { peer: navParam }, bubbles: true }));
+      };
       this.appendChild(li);
     }
   }

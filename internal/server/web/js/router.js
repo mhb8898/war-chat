@@ -2,8 +2,10 @@
 
 export function getRoute() {
   const hash = typeof window !== 'undefined' ? window.location.hash.slice(1) || 'chats' : 'chats';
-  const [view, param] = hash.split('/');
-  return { view: view || 'chats', param: param || null };
+  const firstSlash = hash.indexOf('/');
+  const view = firstSlash === -1 ? (hash || 'chats') : hash.slice(0, firstSlash) || 'chats';
+  const param = firstSlash === -1 ? null : hash.slice(firstSlash + 1) || null;
+  return { view, param };
 }
 
 export function navigate(view, param) {

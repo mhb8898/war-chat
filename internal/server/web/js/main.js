@@ -315,16 +315,18 @@ async function init() {
     };
   }
 
-  // Send message
-  const btnSend = document.getElementById('btnSend');
-  if (btnSend) btnSend.onclick = () => sendMessageFromInput();
-  const messageInput = document.getElementById('messageInput');
-  if (messageInput) messageInput.onkeydown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+  // Send message (delegate so Send works from any chat pane instance, e.g. after view changes)
+  document.addEventListener('click', (e) => {
+    if (e.target && e.target.id === 'btnSend') {
+      sendMessageFromInput();
+    }
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.target && e.target.id === 'messageInput' && e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendMessageFromInput();
     }
-  };
+  });
 
   window.addEventListener('hashchange', () => render());
 

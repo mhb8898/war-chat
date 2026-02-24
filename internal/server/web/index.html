@@ -74,6 +74,19 @@
         display: none;
       }
       .new-chat-form { display: none; }
+      /* Telegram-style: input fixed to viewport bottom, full-height chat */
+      #chat-pane { position: relative; }
+      #chat-pane .input-bar {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        z-index: 10;
+        padding-bottom: env(safe-area-inset-bottom, 0);
+      }
+      #chat-pane #messages { padding-bottom: 5rem; }
+      /* Hide footer in chat view on mobile (like Telegram) */
+      main:has(.view-main.active) + .app-footer { display: none; }
     }
     .header {
       display: flex;
@@ -117,8 +130,9 @@
     .view-setup, .view-profile { padding: 1.5rem; flex: 1; }
     .view-profile { min-height: 0; overflow-y: auto; width: 100%; }
     body.profile-active .view-main { display: none !important; }
-    .view-main { padding: 0; display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
-    .view-main .layout-split { flex: 1; min-height: 0; }
+    .view-main { padding: 0; display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; height: 100%; position: relative; }
+    .view-main war-chat-main { position: absolute; inset: 0; display: flex; flex-direction: column; overflow: hidden; }
+    .view-main war-chat-main .layout-split { flex: 1; min-height: 0; }
     input, button, textarea {
       padding: 0.75rem;
       margin: 0.25rem 0;
@@ -203,9 +217,10 @@
       flex-direction: column;
       justify-content: flex-end;
       gap: 0.5rem;
-      min-height: min-content;
+      min-height: 100%;
     }
     .msg {
+      display: block;
       padding: 0.5rem 0.75rem;
       border-radius: 12px;
       max-width: 85%;
