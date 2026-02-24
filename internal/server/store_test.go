@@ -212,3 +212,27 @@ func TestStore_GetOffline_noDirReturnsNil(t *testing.T) {
 		t.Errorf("GetOffline(nonexistent): expected nil, got %v", msgs)
 	}
 }
+
+func TestStore_pathValidation(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	// Invalid recipient or msgID rejected by QueueOffline
+	if err := store.QueueOffline("bad/recipient", "msg1", "a", "p", "n", 0); err == nil {
+		t.Error("QueueOffline with path sep in recipient should fail")
+	}
+	if err := store.QueueOffline("bob", "bad/id", "a", "p", "n", 0); err == nil {
+		t.Error("QueueOffline with path sep in msgID should fail")
+	}
+
+	// Invalid recipient returns nil from GetOffline
+	msgs, err := store.GetOffline("bad..recipient")
+	if err != nil {
+		t.Fatalf("GetOffline: %v", err)
+	}
+	if msgs != nil {
+		t.Errorf("GetOffline(invalid recipient): expected nil, got %v", msgs)
+	}
+}

@@ -5,10 +5,21 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
 var ErrDuplicateUsername = errors.New("username already taken with a different key")
+
+// safePathComponent returns false if name could be used for path traversal.
+func safePathComponent(name string) bool {
+	if name == "" {
+		return false
+	}
+	return !strings.Contains(name, "/") &&
+		!strings.Contains(name, "\\") &&
+		!strings.Contains(name, "..")
+}
 
 type Store struct {
 	mu         sync.RWMutex
@@ -97,6 +108,10 @@ func (s *Store) QueueOffline(recipient, msgID, from, payload, nonce string, ts i
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if !safePathComponent(recipient) || !safePathComponent(msgID) {
+		return errors.New("invalid recipient or message id")
+	}
+
 	dir := filepath.Join(s.offlineDir, recipient)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
@@ -119,6 +134,9 @@ func (s *Store) QueueOffline(recipient, msgID, from, payload, nonce string, ts i
 }
 
 func (s *Store) GetOffline(recipient string) ([]map[string]interface{}, error) {
+	if !safePathComponent(recipient) {
+		return nil, nil
+	}
 	s.mu.RLock()
 	dir := filepath.Join(s.offlineDir, recipient)
 	s.mu.RUnlock()
@@ -136,7 +154,11 @@ func (s *Store) GetOffline(recipient string) ([]map[string]interface{}, error) {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
 			continue
 		}
-		path := filepath.Join(dir, e.Name())
+		base := e.Name()
+		if !safePathComponent(strings.TrimSuffix(base, ".json")) {
+			continue
+		}
+		path := filepath.Join(dir, base)
 		data, err := os.ReadFile(path)
 		if err != nil {
 			continue
@@ -154,8 +176,14 @@ func (s *Store) DeleteOffline(recipient string, ids []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if !safePathComponent(recipient) {
+		return errors.New("invalid recipient")
+	}
 	dir := filepath.Join(s.offlineDir, recipient)
 	for _, id := range ids {
+		if !safePathComponent(id) {
+			continue
+		}
 		path := filepath.Join(dir, id+".json")
 		_ = os.Remove(path)
 	}
