@@ -10,11 +10,12 @@ function ensureCrypto() {
   }
 }
 const DB_NAME = 'war-chat';
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 const STORE_MSGS = 'messages';
 const STORE_KEYS = 'keys';
 const STORE_KEYPAIRS = 'keypairs';
 const STORE_PASSKEY_CREDS = 'passkey_credentials';
+const STORE_GROUPS = 'groups';
 const SESSION_USER = 'war-chat-username';
 const SESSION_MNEMONIC = 'war-chat-mnemonic';
 const SESSION_SEED = 'war-chat-seed';
@@ -51,6 +52,9 @@ function openDB() {
       }
       if (!database.objectStoreNames.contains(STORE_PASSKEY_CREDS)) {
         database.createObjectStore(STORE_PASSKEY_CREDS, { keyPath: 'credentialId' });
+      }
+      if (!database.objectStoreNames.contains(STORE_GROUPS)) {
+        database.createObjectStore(STORE_GROUPS, { keyPath: 'id' });
       }
     };
   });
@@ -118,7 +122,87 @@ async function getConversations() {
       byPeer[m.peer] = { peer: m.peer, lastMsg: m.text, lastTs: ts, lastId: id };
     }
   }
+  const groups = await getAllGroups();
+  for (const g of groups) {
+    const peer = peerFromGroupId(g.id);
+    if (!byPeer[peer]) {
+      byPeer[peer] = { peer, lastMsg: 'No messages', lastTs: g.createdAt || 0, lastId: '', groupName: g.name };
+    } else {
+      byPeer[peer].groupName = g.name;
+    }
+  }
   return Object.values(byPeer).sort((a, b) => b.lastTs - a.lastTs);
+}
+
+const GROUP_PEER_PREFIX = 'group:';
+
+function isGroupPeer(peer) {
+  return typeof peer === 'string' && peer.startsWith(GROUP_PEER_PREFIX);
+}
+
+function groupPeerId(peer) {
+  return isGroupPeer(peer) ? peer.slice(GROUP_PEER_PREFIX.length) : null;
+}
+
+function peerFromGroupId(groupId) {
+  return GROUP_PEER_PREFIX + groupId;
+}
+
+async function generateSenderKeyRaw() {
+  const raw = crypto.getRandomValues(new Uint8Array(32));
+  const key = await crypto.subtle.importKey('raw', raw, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  return { key, raw };
+}
+
+function base64ToArrayBuffer(b64) {
+  const bin = atob(b64);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return arr;
+}
+
+function arrayBufferToBase64(buf) {
+  return btoa(String.fromCharCode.apply(null, new Uint8Array(buf)));
+}
+
+async function importSenderKeyFromBase64(b64) {
+  const raw = base64ToArrayBuffer(b64);
+  return crypto.subtle.importKey('raw', raw, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+}
+
+async function saveGroup(record) {
+  if (!db) return;
+  const store = db.transaction(STORE_GROUPS, 'readwrite').objectStore(STORE_GROUPS);
+  store.put(record);
+  return new Promise((resolve) => { store.transaction.oncomplete = resolve; });
+}
+
+async function getGroup(groupId) {
+  if (!db) return null;
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_GROUPS, 'readonly');
+    tx.objectStore(STORE_GROUPS).get(groupId).onsuccess = (e) => resolve(e.target.result || null);
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function deleteGroup(groupId) {
+  if (!db) return;
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_GROUPS, 'readwrite');
+    tx.objectStore(STORE_GROUPS).delete(groupId);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function getAllGroups() {
+  if (!db) return [];
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_GROUPS, 'readonly');
+    tx.objectStore(STORE_GROUPS).getAll().onsuccess = (e) => resolve(e.target.result || []);
+    tx.onerror = () => reject(tx.error);
+  });
 }
 
 function isLoggedIn() {
@@ -197,6 +281,200 @@ async function showNewChatModal() {
   searchInput.onkeyup = onSearch;
 }
 
+let newGroupSelectedUsers = new Set();
+
+async function showNewGroupModal() {
+  const modal = document.getElementById('newGroupModal');
+  const nameInput = document.getElementById('newGroupName');
+  const listEl = document.getElementById('newGroupUserList');
+  const emptyEl = document.getElementById('newGroupUserListEmpty');
+  if (!modal || !nameInput || !listEl) return;
+  nameInput.value = '';
+  newGroupSelectedUsers = new Set();
+  modal.classList.add('visible');
+  nameInput.focus();
+  const users = await fetchUsers();
+  listEl.innerHTML = '';
+  if (users.length === 0) {
+    if (emptyEl) emptyEl.classList.remove('hidden');
+    return;
+  }
+  if (emptyEl) emptyEl.classList.add('hidden');
+  users.forEach((username) => {
+    const li = document.createElement('li');
+    li.style.display = 'flex';
+    li.style.alignItems = 'center';
+    li.style.gap = '0.5rem';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.dataset.username = username;
+    cb.onchange = () => {
+      if (cb.checked) newGroupSelectedUsers.add(username);
+      else newGroupSelectedUsers.delete(username);
+    };
+    li.appendChild(cb);
+    li.appendChild(document.createElement('span')).textContent = username;
+    li.onclick = () => { cb.checked = !cb.checked; cb.dispatchEvent(new Event('change')); };
+    listEl.appendChild(li);
+  });
+}
+
+async function createGroup() {
+  const nameInput = document.getElementById('newGroupName');
+  const modal = document.getElementById('newGroupModal');
+  const groupName = (nameInput && nameInput.value.trim()) || '';
+  if (!groupName) {
+    alert('Enter a group name');
+    return;
+  }
+  if (!keys || !currentUsername || !ws || ws.readyState !== WebSocket.OPEN) {
+    alert('Not connected. Try again.');
+    return;
+  }
+  const members = [currentUsername, ...Array.from(newGroupSelectedUsers)];
+  if (members.length < 2) {
+    alert('Add at least one member');
+    return;
+  }
+  const groupId = crypto.randomUUID();
+  ws.send(JSON.stringify({ type: 'create_group', groupId, name: groupName, members }));
+
+  const { key: mySenderKey, raw: mySenderKeyRaw } = await generateSenderKeyRaw();
+  const mySenderKeyB64 = arrayBufferToBase64(mySenderKeyRaw);
+
+  for (const member of members) {
+    if (member === currentUsername) continue;
+    try {
+      const pubkeyB64 = await getRecipientPubkey(member);
+      const pub = await importPubkeyFromBase64(pubkeyB64);
+      const sharedKey = await deriveSharedKey(keys.privateKey, pub);
+      const bundle = {
+        groupId,
+        name: groupName,
+        members,
+        creator: currentUsername,
+        senderKeys: { [currentUsername]: mySenderKeyB64 },
+      };
+      const plaintext = JSON.stringify(bundle);
+      const { ciphertext, iv } = await encrypt(plaintext, sharedKey);
+      const payload = btoa(String.fromCharCode.apply(null, new Uint8Array(ciphertext)));
+      const nonce = btoa(String.fromCharCode.apply(null, new Uint8Array(iv)));
+      ws.send(JSON.stringify({ type: 'group_invite', to: member, groupId, payload, nonce }));
+    } catch (e) {
+      console.error('Failed to send invite to ' + member, e);
+    }
+  }
+
+  await saveGroup({
+    id: groupId,
+    name: groupName,
+    members,
+    createdBy: currentUsername,
+    createdAt: Date.now(),
+    mySenderKeyB64,
+    senderKeys: {},
+  });
+
+  if (modal) modal.classList.remove('visible');
+  if (nameInput) nameInput.value = '';
+  newGroupSelectedUsers = new Set();
+  navigate('chat', 'group/' + groupId);
+}
+
+let addMemberSelectedUser = null;
+
+async function showAddMemberModal() {
+  const modal = document.getElementById('addMemberModal');
+  const listEl = document.getElementById('addMemberUserList');
+  const emptyEl = document.getElementById('addMemberUserListEmpty');
+  if (!modal || !listEl || !isGroupPeer(currentRecipient)) return;
+  const groupId = groupPeerId(currentRecipient);
+  const group = await getGroup(groupId);
+  if (!group) return;
+  addMemberSelectedUser = null;
+  modal.classList.add('visible');
+  const allUsers = await fetchUsers();
+  const membersSet = new Set(group.members);
+  const candidates = allUsers.filter((u) => !membersSet.has(u));
+  listEl.innerHTML = '';
+  if (candidates.length === 0) {
+    if (emptyEl) emptyEl.classList.remove('hidden');
+    return;
+  }
+  if (emptyEl) emptyEl.classList.add('hidden');
+  candidates.forEach((username) => {
+    const li = document.createElement('li');
+    li.style.display = 'flex';
+    li.style.alignItems = 'center';
+    li.style.gap = '0.5rem';
+    li.textContent = username;
+    li.onclick = () => {
+      addMemberSelectedUser = username;
+      listEl.querySelectorAll('li').forEach((el) => el.classList.remove('selected'));
+      li.classList.add('selected');
+    };
+    listEl.appendChild(li);
+  });
+}
+
+async function addMemberToGroup() {
+  if (!addMemberSelectedUser || !isGroupPeer(currentRecipient)) {
+    alert('Select a user to add');
+    return;
+  }
+  const groupId = groupPeerId(currentRecipient);
+  const group = await getGroup(groupId);
+  if (!group || !ws || ws.readyState !== WebSocket.OPEN || !keys) return;
+  const newMember = addMemberSelectedUser;
+  const newMembers = [...group.members, newMember];
+  ws.send(JSON.stringify({ type: 'update_group', groupId, members: newMembers }));
+
+  const senderKeysBundle = { ...(group.senderKeys || {}) };
+  if (group.mySenderKeyB64) {
+    senderKeysBundle[currentUsername] = group.mySenderKeyB64;
+  }
+
+  try {
+    const pubkeyB64 = await getRecipientPubkey(newMember);
+    const pub = await importPubkeyFromBase64(pubkeyB64);
+    const sharedKey = await deriveSharedKey(keys.privateKey, pub);
+    const bundle = {
+      groupId,
+      name: group.name,
+      members: newMembers,
+      creator: group.createdBy,
+      senderKeys: senderKeysBundle,
+    };
+    const plaintext = JSON.stringify(bundle);
+    const { ciphertext, iv } = await encrypt(plaintext, sharedKey);
+    const payload = btoa(String.fromCharCode.apply(null, new Uint8Array(ciphertext)));
+    const nonce = btoa(String.fromCharCode.apply(null, new Uint8Array(iv)));
+    ws.send(JSON.stringify({ type: 'group_invite', to: newMember, groupId, payload, nonce }));
+  } catch (e) {
+    console.error('Failed to send invite to ' + newMember, e);
+  }
+
+  group.members = newMembers;
+  await saveGroup(group);
+
+  const modal = document.getElementById('addMemberModal');
+  if (modal) modal.classList.remove('visible');
+  addMemberSelectedUser = null;
+  renderChatList(getSelectedPeerFromRoute());
+}
+
+async function leaveGroup() {
+  if (!isGroupPeer(currentRecipient)) return;
+  if (!confirm('Leave this group? You will stop receiving messages.')) return;
+  const groupId = groupPeerId(currentRecipient);
+  const group = await getGroup(groupId);
+  if (!group || !ws || ws.readyState !== WebSocket.OPEN) return;
+  const newMembers = group.members.filter((m) => m !== currentUsername);
+  ws.send(JSON.stringify({ type: 'update_group', groupId, members: newMembers }));
+  await deleteGroup(groupId);
+  navigate('chats');
+}
+
 function render() {
   const { view, param } = getRoute();
   document.querySelectorAll('.view').forEach((v) => v.classList.remove('active'));
@@ -225,9 +503,10 @@ function render() {
       break;
     case 'chat':
       if (param) {
-        showView('main', param);
-        openChat(param);
-        renderMainView(param);
+        const peer = param.startsWith('group/') ? peerFromGroupId(param.slice(6)) : param;
+        showView('main', peer);
+        openChat(peer);
+        renderMainView(peer);
       } else {
         navigate('chats');
       }
@@ -244,7 +523,8 @@ function render() {
 
 function getSelectedPeerFromRoute() {
   const { view, param } = getRoute();
-  return (view === 'chat' && param) ? param : null;
+  if (view !== 'chat' || !param) return null;
+  return param.startsWith('group/') ? peerFromGroupId(param.slice(6)) : param;
 }
 
 async function renderMainView(selectedPeer) {
@@ -276,18 +556,31 @@ function showView(name, param) {
 
   if (name === 'main') {
     connectWS();
-    const headerTitle = param
-      ? (param === currentUsername ? 'Saved Messages' : param)
-      : 'War Chat';
+    let headerTitle = 'War Chat';
+    if (param) {
+      if (param === currentUsername) headerTitle = 'Saved Messages';
+      else if (isGroupPeer(param)) {
+        headerTitle = 'Group';
+        getGroup(groupPeerId(param)).then((g) => {
+          const h = document.querySelector('.header h1');
+          if (h && g) h.textContent = g.name;
+        });
+      } else headerTitle = param;
+    }
     document.querySelector('.header h1').textContent = headerTitle;
     const isMobile = window.matchMedia('(max-width: 768px)').matches;
     const newChatBtn = (isMobile && !param) ? '<button class="btn-icon" id="btnNewChatHeader" title="New chat">&#10133;</button>' : '';
     actions.innerHTML = (param ? '<button class="btn-icon" id="btnBack" title="Back">&#8592;</button>' : '') +
+      (param && isGroupPeer(param) ? '<button class="btn-icon" id="btnAddMember" title="Add member">&#10133;</button><button class="btn-icon" id="btnLeaveGroup" title="Leave group">&#128473;</button>' : '') +
       newChatBtn +
       '<button class="btn-icon" id="btnProfile" title="Profile">&#9776;</button>' +
       '<button class="btn-icon" id="btnLogout" title="Log out">&#128274;</button>';
     const btnBack = document.getElementById('btnBack');
     if (btnBack) btnBack.onclick = () => navigate('chats');
+    const btnAddMember = document.getElementById('btnAddMember');
+    if (btnAddMember) btnAddMember.onclick = () => showAddMemberModal();
+    const btnLeaveGroup = document.getElementById('btnLeaveGroup');
+    if (btnLeaveGroup) btnLeaveGroup.onclick = () => leaveGroup();
     const btnNewChatHeader = document.getElementById('btnNewChatHeader');
     if (btnNewChatHeader) btnNewChatHeader.onclick = () => showNewChatModal();
     document.getElementById('btnProfile').onclick = () => navigate('profile');
@@ -936,17 +1229,19 @@ async function renderChatList(selectedPeer) {
     for (const c of convos) {
       const li = document.createElement('li');
       const isSelf = c.peer === currentUsername;
-      const displayName = isSelf ? 'Saved Messages' : c.peer;
+      const isGroup = isGroupPeer(c.peer);
+      const displayName = isSelf ? 'Saved Messages' : (c.groupName || (isGroup ? 'Group' : c.peer));
+      const navParam = isGroup ? 'group/' + groupPeerId(c.peer) : c.peer;
       li.className = 'chat-row' + (c.peer === selectedPeer ? ' selected' : '');
       li.innerHTML = `
-        <div class="chat-avatar">${isSelf ? '&#128190;' : (c.peer[0] || '?').toUpperCase()}</div>
+        <div class="chat-avatar">${isSelf ? '&#128190;' : (isGroup ? '&#128101;' : (c.peer[0] || '?').toUpperCase())}</div>
         <div class="chat-info">
           <div class="chat-name">${escapeHtml(displayName)}</div>
           <div class="chat-preview">${escapeHtml(c.lastMsg || 'No messages')}</div>
         </div>
         <div class="chat-time">${formatTime(c.lastTs)}</div>
       `;
-      li.onclick = () => navigate('chat', c.peer);
+      li.onclick = () => navigate('chat', navParam);
       list.appendChild(li);
     }
   }
@@ -1292,6 +1587,12 @@ function connectWS() {
     } else if (msg.type === 'incoming') {
       await handleIncoming(msg);
       renderChatList(getSelectedPeerFromRoute());
+    } else if (msg.type === 'group_invite') {
+      await handleGroupInvite(msg);
+      renderChatList(getSelectedPeerFromRoute());
+    } else if (msg.type === 'incoming_group') {
+      await handleIncomingGroup(msg);
+      renderChatList(getSelectedPeerFromRoute());
     }
   };
 
@@ -1333,6 +1634,14 @@ function maybeNotify(from, text) {
 }
 
 async function handleIncoming(msg) {
+  if (msg.type === 'group_invite') {
+    await handleGroupInvite(msg);
+    return;
+  }
+  if (msg.type === 'incoming_group') {
+    await handleIncomingGroup(msg);
+    return;
+  }
   if (msg.from === currentUsername) return; // Saved Messages: ignore self-messages from server
   let text = '[encrypted]';
   try {
@@ -1364,12 +1673,78 @@ async function handleIncoming(msg) {
   }
 }
 
+async function handleGroupInvite(msg) {
+  if (!keys || !msg.from || !msg.payload || !msg.nonce) return;
+  try {
+    const senderPubkeyB64 = await getRecipientPubkey(msg.from);
+    const senderPub = await importPubkeyFromBase64(senderPubkeyB64);
+    if (!senderPub) return;
+    const sharedKey = await deriveSharedKey(keys.privateKey, senderPub);
+    const plaintext = await decrypt(msg.payload, msg.nonce, sharedKey);
+    const bundle = JSON.parse(plaintext);
+    const groupId = bundle.groupId;
+    if (!groupId) return;
+    const existing = await getGroup(groupId);
+    if (bundle.members && bundle.name) {
+      await saveGroup({
+        id: groupId,
+        name: bundle.name,
+        members: bundle.members,
+        createdBy: bundle.creator || msg.from,
+        createdAt: Date.now(),
+        mySenderKeyB64: null,
+        senderKeys: bundle.senderKeys || {},
+      });
+    } else if (existing && bundle.senderKeys) {
+      existing.senderKeys = existing.senderKeys || {};
+      Object.assign(existing.senderKeys, bundle.senderKeys);
+      await saveGroup(existing);
+    }
+  } catch (e) {
+    console.error('Group invite decrypt failed', e);
+  }
+}
+
+async function handleIncomingGroup(msg) {
+  const groupId = msg.groupId;
+  if (!groupId || !msg.from || !msg.payload || !msg.nonce) return;
+  const group = await getGroup(groupId);
+  if (!group || !group.senderKeys || !group.senderKeys[msg.from]) return;
+  let text = '[encrypted]';
+  try {
+    const senderKey = await importSenderKeyFromBase64(group.senderKeys[msg.from]);
+    text = await decrypt(msg.payload, msg.nonce, senderKey);
+  } catch (e) {
+    console.error('Group message decrypt failed', e);
+  }
+  const peer = peerFromGroupId(groupId);
+  const m = {
+    id: msg.id || 'msg-' + Date.now(),
+    from: msg.from,
+    text,
+    ts: msg.ts || Date.now(),
+    peer,
+  };
+  await saveMessage(m);
+  if (peer === currentRecipient) {
+    renderMessage(m, false);
+  }
+  if (peer !== currentRecipient || document.hidden) {
+    maybeNotify(msg.from + ' (group)', text);
+  }
+  if (msg.id && ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'delivered', ids: [msg.id] }));
+  }
+}
+
 async function sendMessage() {
   const input = document.getElementById('messageInput');
   const text = (input && input.value.trim()) || '';
   if (!text || !currentRecipient || !keys) return;
 
   const isSelf = currentRecipient === currentUsername;
+  const isGroup = isGroupPeer(currentRecipient);
+
   const m = {
     id: 'local-' + Date.now(),
     from: currentUsername,
@@ -1387,6 +1762,52 @@ async function sendMessage() {
   }
 
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+  if (isGroup) {
+    const groupId = groupPeerId(currentRecipient);
+    let group = await getGroup(groupId);
+    if (!group) {
+      alert('Group not found');
+      return;
+    }
+    let senderKey = null;
+    if (group.mySenderKeyB64) {
+      senderKey = await importSenderKeyFromBase64(group.mySenderKeyB64);
+    } else {
+      const { key, raw } = await generateSenderKeyRaw();
+      senderKey = key;
+      group.mySenderKeyB64 = arrayBufferToBase64(raw);
+      group.senderKeys = group.senderKeys || {};
+      group.senderKeys[currentUsername] = group.mySenderKeyB64;
+      await saveGroup(group);
+      for (const member of group.members) {
+        if (member === currentUsername) continue;
+        try {
+          const pubkeyB64 = await getRecipientPubkey(member);
+          const pub = await importPubkeyFromBase64(pubkeyB64);
+          const sharedKey = await deriveSharedKey(keys.privateKey, pub);
+          const bundle = { groupId, senderKeys: { [currentUsername]: group.mySenderKeyB64 } };
+          const plaintext = JSON.stringify(bundle);
+          const { ciphertext, iv } = await encrypt(plaintext, sharedKey);
+          const payload = btoa(String.fromCharCode.apply(null, new Uint8Array(ciphertext)));
+          const nonce = btoa(String.fromCharCode.apply(null, new Uint8Array(iv)));
+          ws.send(JSON.stringify({ type: 'group_invite', to: member, groupId, payload, nonce }));
+        } catch (e) {
+          console.error('Failed to send sender key to ' + member, e);
+        }
+      }
+    }
+    const { ciphertext, iv } = await encrypt(text, senderKey);
+    const payload = btoa(String.fromCharCode.apply(null, new Uint8Array(ciphertext)));
+    const nonce = btoa(String.fromCharCode.apply(null, new Uint8Array(iv)));
+    ws.send(JSON.stringify({ type: 'group_send', groupId, payload, nonce }));
+    await saveMessage(m);
+    renderMessage(m, false);
+    input.value = '';
+    renderChatList(getSelectedPeerFromRoute());
+    return;
+  }
+
   try {
     const recipientPubkeyB64 = await getRecipientPubkey(currentRecipient);
     const recipientPub = await importPubkeyFromBase64(recipientPubkeyB64);
@@ -1579,6 +2000,7 @@ async function init() {
   };
 
   document.getElementById('btnNewChat').onclick = () => showNewChatModal();
+  document.getElementById('btnNewGroup').onclick = () => showNewGroupModal();
 
   const newChatModal = document.getElementById('newChatModal');
   if (newChatModal) {
@@ -1590,6 +2012,38 @@ async function init() {
       if (e.target === newChatModal) {
         newChatModal.classList.remove('visible');
         document.getElementById('newChatSearchModal').value = '';
+      }
+    };
+  }
+
+  const newGroupModal = document.getElementById('newGroupModal');
+  if (newGroupModal) {
+    document.getElementById('btnNewGroupCancel').onclick = () => {
+      newGroupModal.classList.remove('visible');
+      document.getElementById('newGroupName').value = '';
+      newGroupSelectedUsers = new Set();
+    };
+    document.getElementById('btnNewGroupCreate').onclick = () => createGroup();
+    newGroupModal.onclick = (e) => {
+      if (e.target === newGroupModal) {
+        newGroupModal.classList.remove('visible');
+        document.getElementById('newGroupName').value = '';
+        newGroupSelectedUsers = new Set();
+      }
+    };
+  }
+
+  const addMemberModal = document.getElementById('addMemberModal');
+  if (addMemberModal) {
+    document.getElementById('btnAddMemberCancel').onclick = () => {
+      addMemberModal.classList.remove('visible');
+      addMemberSelectedUser = null;
+    };
+    document.getElementById('btnAddMemberConfirm').onclick = () => addMemberToGroup();
+    addMemberModal.onclick = (e) => {
+      if (e.target === addMemberModal) {
+        addMemberModal.classList.remove('visible');
+        addMemberSelectedUser = null;
       }
     };
   }

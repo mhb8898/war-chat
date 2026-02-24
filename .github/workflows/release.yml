@@ -39,6 +39,7 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
+          build-args: VERSION=${{ steps.version.outputs.version }}
           tags: |
             ghcr.io/${{ github.repository }}:${{ steps.version.outputs.version }}
             ghcr.io/${{ github.repository }}:latest
@@ -63,7 +64,7 @@ jobs:
         run: |
           export VERSION=${{ steps.version.outputs.version }}
           export CGO_ENABLED=0
-          export LDFLAGS="-s -w"
+          export LDFLAGS="-s -w -X main.Version=${VERSION}"
           mkdir -p dist
 
           GOOS=linux   GOARCH=amd64 go build -ldflags="$LDFLAGS" -o dist/war-chat-$VERSION-linux-amd64       ./cmd/server

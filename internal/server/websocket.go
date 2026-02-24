@@ -197,6 +197,124 @@ func (c *Client) readPump(store *Store) {
 			if json.Unmarshal(message, &m) == nil && c.username != "" && len(m.IDs) > 0 {
 				_ = store.DeleteOffline(c.username, m.IDs)
 			}
+		case "create_group":
+			var req struct {
+				GroupID string   `json:"groupId"`
+				Name    string   `json:"name"`
+				Members []string `json:"members"`
+			}
+			if json.Unmarshal(message, &req) != nil || req.GroupID == "" || req.Name == "" || c.username == "" {
+				continue
+			}
+			// Creator must be in members
+			found := false
+			for _, m := range req.Members {
+				if m == c.username {
+					found = true
+					break
+				}
+			}
+			if !found {
+				continue
+			}
+			_ = store.CreateGroup(req.GroupID, req.Name, req.Members, c.username)
+		case "group_invite":
+			var req struct {
+				To      string `json:"to"`
+				GroupID string `json:"groupId"`
+				Payload string `json:"payload"`
+				Nonce   string `json:"nonce"`
+			}
+			if json.Unmarshal(message, &req) != nil || req.To == "" || req.GroupID == "" || req.Payload == "" || req.Nonce == "" || c.username == "" {
+				continue
+			}
+			msgID := uuid.New().String()
+			ts := time.Now().UnixMilli()
+			invite := map[string]interface{}{
+				"type":    "group_invite",
+				"id":      msgID,
+				"from":    c.username,
+				"groupId": req.GroupID,
+				"payload": req.Payload,
+				"nonce":   req.Nonce,
+				"ts":      ts,
+			}
+			data, _ := json.Marshal(invite)
+			if c.hub.IsOnline(req.To) {
+				c.hub.broadcast <- &broadcastMsg{recipient: req.To, data: data}
+			} else {
+				meta := map[string]interface{}{"type": "group_invite", "groupId": req.GroupID}
+				_ = store.QueueOfflineWithMeta(req.To, msgID, c.username, req.Payload, req.Nonce, ts, meta)
+			}
+		case "group_send":
+			var req struct {
+				GroupID string `json:"groupId"`
+				Payload string `json:"payload"`
+				Nonce   string `json:"nonce"`
+			}
+			if json.Unmarshal(message, &req) != nil || req.GroupID == "" || req.Payload == "" || req.Nonce == "" || c.username == "" {
+				continue
+			}
+			g, err := store.GetGroup(req.GroupID)
+			if err != nil || g == nil {
+				continue
+			}
+			isMember := false
+			for _, m := range g.Members {
+				if m == c.username {
+					isMember = true
+					break
+				}
+			}
+			if !isMember {
+				continue
+			}
+			msgID := uuid.New().String()
+			ts := time.Now().UnixMilli()
+			for _, member := range g.Members {
+				if member == c.username {
+					continue
+				}
+				groupMsg := map[string]interface{}{
+					"type":    "incoming_group",
+					"id":      msgID,
+					"from":    c.username,
+					"groupId": req.GroupID,
+					"payload": req.Payload,
+					"nonce":   req.Nonce,
+					"ts":      ts,
+				}
+				data, _ := json.Marshal(groupMsg)
+				if c.hub.IsOnline(member) {
+					c.hub.broadcast <- &broadcastMsg{recipient: member, data: data}
+				} else {
+					meta := map[string]interface{}{"type": "incoming_group", "groupId": req.GroupID}
+					_ = store.QueueOfflineWithMeta(member, msgID, c.username, req.Payload, req.Nonce, ts, meta)
+				}
+			}
+		case "update_group":
+			var req struct {
+				GroupID string   `json:"groupId"`
+				Members []string `json:"members"`
+			}
+			if json.Unmarshal(message, &req) != nil || req.GroupID == "" || len(req.Members) == 0 || c.username == "" {
+				continue
+			}
+			g, err := store.GetGroup(req.GroupID)
+			if err != nil || g == nil {
+				continue
+			}
+			isMember := false
+			for _, m := range g.Members {
+				if m == c.username {
+					isMember = true
+					break
+				}
+			}
+			if !isMember {
+				continue
+			}
+			_ = store.UpdateGroupMembers(req.GroupID, req.Members)
 		}
 	}
 }

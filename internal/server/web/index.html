@@ -300,6 +300,7 @@
       gap: 0.75rem;
     }
     .user-list li:hover { background: #0f3460; }
+    .user-list li.selected { background: #0f3460; border-left: 3px solid #e94560; }
     .user-list .user-avatar { width: 36px; height: 36px; border-radius: 50%; background: #0f3460; display: flex; align-items: center; justify-content: center; font-weight: bold; flex-shrink: 0; }
     .user-list .user-name { flex: 1; }
     .user-list-empty { padding: 1rem; text-align: center; opacity: 0.8; }
@@ -350,6 +351,7 @@
           <aside class="sidebar">
             <div class="new-chat-form">
               <button id="btnNewChat" style="width:100%">New chat</button>
+              <button id="btnNewGroup" style="width:100%;margin-top:0.25rem">New group</button>
             </div>
             <ul id="chat-list" class="chat-list"></ul>
             <div id="chat-list-empty" class="empty-state hidden">
@@ -414,6 +416,32 @@
       <div id="newChatUserListEmpty" class="user-list-empty hidden">No users found</div>
       <div class="modal-actions">
         <button id="btnNewChatModalCancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="newGroupModal" class="new-chat-modal">
+    <div class="modal-inner">
+      <label for="newGroupName">Group name</label>
+      <input type="text" id="newGroupName" placeholder="Group name" maxlength="64" autocomplete="off">
+      <label>Add members</label>
+      <ul id="newGroupUserList" class="user-list"></ul>
+      <div id="newGroupUserListEmpty" class="user-list-empty hidden">No users found</div>
+      <div class="modal-actions">
+        <button id="btnNewGroupCancel">Cancel</button>
+        <button id="btnNewGroupCreate">Create group</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="addMemberModal" class="new-chat-modal">
+    <div class="modal-inner">
+      <label>Add member to group</label>
+      <ul id="addMemberUserList" class="user-list"></ul>
+      <div id="addMemberUserListEmpty" class="user-list-empty hidden">No users to add</div>
+      <div class="modal-actions">
+        <button id="btnAddMemberCancel">Cancel</button>
+        <button id="btnAddMemberConfirm">Add</button>
       </div>
     </div>
   </div>
