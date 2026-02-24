@@ -10,12 +10,13 @@ function ensureCrypto() {
   }
 }
 const DB_NAME = 'war-chat';
-const DB_VERSION = 6;
+const DB_VERSION = 7;
 const STORE_MSGS = 'messages';
 const STORE_KEYS = 'keys';
 const STORE_KEYPAIRS = 'keypairs';
 const STORE_PASSKEY_CREDS = 'passkey_credentials';
 const STORE_GROUPS = 'groups';
+const STORE_PENDING_GROUP_INVITES = 'pending_group_invites';
 const SESSION_USER = 'war-chat-username';
 const SESSION_MNEMONIC = 'war-chat-mnemonic';
 const SESSION_SEED = 'war-chat-seed';
@@ -55,6 +56,9 @@ function openDB() {
       }
       if (!database.objectStoreNames.contains(STORE_GROUPS)) {
         database.createObjectStore(STORE_GROUPS, { keyPath: 'id' });
+      }
+      if (!database.objectStoreNames.contains(STORE_PENDING_GROUP_INVITES)) {
+        database.createObjectStore(STORE_PENDING_GROUP_INVITES, { keyPath: 'id' });
       }
     };
   });
@@ -201,6 +205,32 @@ async function getAllGroups() {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_GROUPS, 'readonly');
     tx.objectStore(STORE_GROUPS).getAll().onsuccess = (e) => resolve(e.target.result || []);
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function savePendingGroupInvite(inv) {
+  if (!db) return;
+  const store = db.transaction(STORE_PENDING_GROUP_INVITES, 'readwrite').objectStore(STORE_PENDING_GROUP_INVITES);
+  store.put(inv);
+  return new Promise((resolve) => { store.transaction.oncomplete = resolve; });
+}
+
+async function getPendingGroupInvites() {
+  if (!db) return [];
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_PENDING_GROUP_INVITES, 'readonly');
+    tx.objectStore(STORE_PENDING_GROUP_INVITES).getAll().onsuccess = (e) => resolve(e.target.result || []);
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function deletePendingGroupInvite(groupId) {
+  if (!db) return;
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_PENDING_GROUP_INVITES, 'readwrite');
+    tx.objectStore(STORE_PENDING_GROUP_INVITES).delete(groupId);
+    tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
 }
@@ -1216,10 +1246,70 @@ function formatTime(ts) {
 }
 
 // --- View renderers ---
+async function renderGroupInvites() {
+  const section = document.getElementById('group-invites-section');
+  const listEl = document.getElementById('group-invites-list');
+  if (!section || !listEl) return;
+  const invites = await getPendingGroupInvites();
+  if (invites.length === 0) {
+    section.classList.add('hidden');
+    return;
+  }
+  section.classList.remove('hidden');
+  listEl.innerHTML = '';
+  for (const inv of invites) {
+    const li = document.createElement('li');
+    li.className = 'group-invite-row';
+    li.innerHTML = `
+      <div class="group-invite-info">
+        <div class="group-invite-text">${escapeHtml(inv.from)} invited you to "${escapeHtml(inv.name)}"</div>
+      </div>
+      <div class="group-invite-actions">
+        <button type="button" data-action="accept" data-group-id="${escapeHtml(inv.id)}">Accept</button>
+        <button type="button" data-action="decline" data-group-id="${escapeHtml(inv.id)}">Decline</button>
+      </div>
+    `;
+    li.querySelector('[data-action="accept"]').onclick = (e) => { e.stopPropagation(); acceptGroupInvite(inv); };
+    li.querySelector('[data-action="decline"]').onclick = (e) => { e.stopPropagation(); declineGroupInvite(inv.id); };
+    listEl.appendChild(li);
+  }
+}
+
+async function acceptGroupInvite(inv) {
+  await saveGroup({
+    id: inv.id,
+    name: inv.name,
+    members: inv.members,
+    createdBy: inv.creator,
+    createdAt: inv.ts || Date.now(),
+    mySenderKeyB64: null,
+    senderKeys: inv.senderKeys || {},
+  });
+  await deletePendingGroupInvite(inv.id);
+  const peer = peerFromGroupId(inv.id);
+  await saveMessage({
+    id: 'sys-join-' + Date.now(),
+    from: '_system',
+    text: 'You joined the group (invited by ' + inv.from + ').',
+    ts: Date.now(),
+    peer,
+  });
+  await renderGroupInvites();
+  await renderChatList(getSelectedPeerFromRoute());
+  navigate('chat', 'group/' + inv.id);
+}
+
+async function declineGroupInvite(groupId) {
+  await deletePendingGroupInvite(groupId);
+  await renderGroupInvites();
+  await renderChatList(getSelectedPeerFromRoute());
+}
+
 async function renderChatList(selectedPeer) {
   const list = document.getElementById('chat-list');
   const empty = document.getElementById('chat-list-empty');
   if (!list) return;
+  await renderGroupInvites();
   const convos = await getConversations();
 
   list.innerHTML = '';
@@ -1541,6 +1631,9 @@ async function openChat(recipient) {
       if (isSelf) {
         div.className = 'msg note';
         div.innerHTML = formatMessage(m.text);
+      } else if (m.from === '_system') {
+        div.className = 'msg note';
+        div.innerHTML = formatMessage(m.text);
       } else {
         div.className = 'msg ' + (m.from === currentUsername ? 'sent' : 'received');
         div.innerHTML = `<span class="meta">${escapeHtml(m.from)}</span><br>${formatMessage(m.text)}`;
@@ -1557,12 +1650,12 @@ function renderMessage(m, isNoteToSelf) {
   if (!container || !inner) return;
   const div = document.createElement('div');
   const isSelf = m.peer === currentUsername;
-  if (isSelf || isNoteToSelf) {
+  if (isSelf || isNoteToSelf || m.from === '_system') {
     div.className = 'msg note';
   } else {
     div.className = 'msg ' + (m.from === currentUsername ? 'sent' : 'received');
   }
-  div.innerHTML = (isSelf || isNoteToSelf) ? formatMessage(m.text) : `<span class="meta">${escapeHtml(m.from)}</span><br>${formatMessage(m.text)}`;
+  div.innerHTML = (isSelf || isNoteToSelf || m.from === '_system') ? formatMessage(m.text) : `<span class="meta">${escapeHtml(m.from)}</span><br>${formatMessage(m.text)}`;
   inner.appendChild(div);
   container.scrollTop = container.scrollHeight;
 }
@@ -1687,19 +1780,16 @@ async function handleGroupInvite(msg) {
     if (!groupId) return;
     const existing = await getGroup(groupId);
     if (bundle.members && bundle.name) {
-      await saveGroup({
+      await savePendingGroupInvite({
         id: groupId,
+        from: msg.from,
         name: bundle.name,
         members: bundle.members,
-        createdBy: bundle.creator || msg.from,
-        createdAt: Date.now(),
-        mySenderKeyB64: null,
+        creator: bundle.creator || msg.from,
         senderKeys: bundle.senderKeys || {},
+        ts: Date.now(),
       });
-      if (typeof alert === 'function') {
-        alert(`${msg.from} added you to the group "${bundle.name}". Check your chat list.`);
-      }
-      maybeNotify(msg.from, 'Added you to group: ' + bundle.name);
+      maybeNotify(msg.from, 'Group invite: ' + bundle.name);
     } else if (existing && bundle.senderKeys) {
       existing.senderKeys = existing.senderKeys || {};
       Object.assign(existing.senderKeys, bundle.senderKeys);

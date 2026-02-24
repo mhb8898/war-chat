@@ -261,6 +261,31 @@
       flex-shrink: 0;
       border-bottom: 1px solid #0f3460;
     }
+    .group-invites-section {
+      flex-shrink: 0;
+      border-bottom: 1px solid #0f3460;
+      padding: 0.5rem 1rem;
+    }
+    .group-invites-title {
+      font-size: 0.75rem;
+      font-weight: 600;
+      opacity: 0.9;
+      margin-bottom: 0.5rem;
+    }
+    .group-invites-list { list-style: none; margin: 0; padding: 0; }
+    .group-invite-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.5rem 0;
+      border-radius: 6px;
+      gap: 0.5rem;
+    }
+    .group-invite-row:hover { background: #16213e; }
+    .group-invite-info { flex: 1; min-width: 0; }
+    .group-invite-text { font-size: 0.875rem; }
+    .group-invite-actions { display: flex; gap: 0.25rem; flex-shrink: 0; }
+    .group-invite-actions button { padding: 0.35rem 0.5rem; font-size: 0.8rem; }
     .hidden { display: none !important; }
     header.hidden { display: none !important; }
     .new-chat-modal {
@@ -352,6 +377,10 @@
             <div class="new-chat-form">
               <button id="btnNewChat" style="width:100%">New chat</button>
               <button id="btnNewGroup" style="width:100%;margin-top:0.25rem">New group</button>
+            </div>
+            <div id="group-invites-section" class="group-invites-section hidden">
+              <div class="group-invites-title">Group invites</div>
+              <ul id="group-invites-list" class="group-invites-list"></ul>
             </div>
             <ul id="chat-list" class="chat-list"></ul>
             <div id="chat-list-empty" class="empty-state hidden">
