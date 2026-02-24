@@ -110,8 +110,12 @@ async function getConversations() {
   const byPeer = {};
   for (const r of byOwner) {
     const m = await decryptMessageFromStorage(r);
-    if (m && (!byPeer[m.peer] || m.ts > byPeer[m.peer].ts)) {
-      byPeer[m.peer] = { peer: m.peer, lastMsg: m.text, lastTs: m.ts };
+    if (!m) continue;
+    const ts = Number(m.ts) || 0;
+    const id = m.id || '';
+    const cur = byPeer[m.peer];
+    if (!cur || ts > cur.lastTs || (ts === cur.lastTs && id > cur.lastId)) {
+      byPeer[m.peer] = { peer: m.peer, lastMsg: m.text, lastTs: ts, lastId: id };
     }
   }
   return Object.values(byPeer).sort((a, b) => b.lastTs - a.lastTs);
