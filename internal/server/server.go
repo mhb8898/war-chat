@@ -7,7 +7,7 @@ import (
 	"net/http"
 )
 
-//go:embed web/*
+//go:embed web
 var webFS embed.FS
 
 type Server struct {
