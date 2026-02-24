@@ -534,6 +534,10 @@ function render() {
       break;
     case 'chat':
       if (param) {
+        if (param === 'group') {
+          navigate('chats');
+          break;
+        }
         const peer = param.startsWith('group/') ? peerFromGroupId(param.slice(6)) : param;
         showView('main', peer);
         openChat(peer);
@@ -555,6 +559,7 @@ function render() {
 function getSelectedPeerFromRoute() {
   const { view, param } = getRoute();
   if (view !== 'chat' || !param) return null;
+  if (param === 'group') return null;
   return param.startsWith('group/') ? peerFromGroupId(param.slice(6)) : param;
 }
 
@@ -1265,12 +1270,12 @@ async function renderGroupInvites() {
         <div class="group-invite-text">${escapeHtml(inv.from)} invited you to "${escapeHtml(inv.name)}"</div>
       </div>
       <div class="group-invite-actions">
-        <button type="button" data-action="accept" data-group-id="${escapeHtml(inv.id)}">Accept</button>
-        <button type="button" data-action="decline" data-group-id="${escapeHtml(inv.id)}">Decline</button>
+        <button type="button" data-action="accept" data-testid="group-invite-accept" data-group-id="${escapeHtml(inv.id)}">Accept</button>
+        <button type="button" data-action="decline" data-testid="group-invite-decline" data-group-id="${escapeHtml(inv.id)}">Decline</button>
       </div>
     `;
-    li.querySelector('[data-action="accept"]').onclick = (e) => { e.stopPropagation(); acceptGroupInvite(inv); };
-    li.querySelector('[data-action="decline"]').onclick = (e) => { e.stopPropagation(); declineGroupInvite(inv.id); };
+    li.querySelector('[data-action="accept"]').onclick = (e) => { e.stopPropagation(); acceptGroupInvite(inv).catch((err) => { console.error(err); alert('Accept failed: ' + (err && err.message)); }); };
+    li.querySelector('[data-action="decline"]').onclick = (e) => { e.stopPropagation(); declineGroupInvite(inv.id).catch((err) => { console.error(err); alert('Decline failed: ' + (err && err.message)); }); };
     listEl.appendChild(li);
   }
 }
@@ -1287,13 +1292,17 @@ async function acceptGroupInvite(inv) {
   });
   await deletePendingGroupInvite(inv.id);
   const peer = peerFromGroupId(inv.id);
-  await saveMessage({
-    id: 'sys-join-' + Date.now(),
-    from: '_system',
-    text: 'You joined the group (invited by ' + inv.from + ').',
-    ts: Date.now(),
-    peer,
-  });
+  try {
+    await saveMessage({
+      id: 'sys-join-' + Date.now(),
+      from: '_system',
+      text: 'You joined the group (invited by ' + inv.from + ').',
+      ts: Date.now(),
+      peer,
+    });
+  } catch (e) {
+    console.warn('Could not save system message:', e);
+  }
   await renderGroupInvites();
   await renderChatList(getSelectedPeerFromRoute());
   navigate('chat', 'group/' + inv.id);

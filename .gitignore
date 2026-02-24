@@ -24,6 +24,9 @@ Thumbs.db
 
 # Playwright / MCP
 .playwright-mcp/
+test-results/
+playwright-report/
+node_modules/
 
 # Build
 /dist/

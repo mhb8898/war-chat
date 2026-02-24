@@ -38,6 +38,21 @@ go run ./cmd/server
 4. **Share** — Copy your chat link (e.g. `http://localhost:8080/u/alice`) or share the QR code from Profile
 5. **Chat** — Messages are E2E encrypted; only you and the recipient can read them
 
+## End-to-end tests (group chat)
+
+E2E tests use Playwright and cover: create group, invite user, accept/decline invite, send message in group.
+
+```bash
+# One-time: install Node deps and Playwright browser
+npm install
+npm run e2e:install
+
+# Run E2E (starts server automatically, or use existing server)
+npm run e2e
+```
+
+To use an already-running server on port 8080: `SKIP_WEB_SERVER=1 npm run e2e`.
+
 ## Configuration
 
 - `PORT` (default: 8080)
