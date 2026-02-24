@@ -10,7 +10,7 @@ import * as groups from './groups.js';
 import * as ws from './ws.js';
 import * as api from './api.js';
 import * as passkey from './passkey.js';
-import { escapeHtml, formatMessage, formatTime } from './utils.js';
+import { escapeHtml, formatMessage } from './utils.js';
 
 export { navigate, getRoute };
 
@@ -22,7 +22,8 @@ export function getSelectedPeerFromRoute() {
 }
 
 function getMessagesContainer() {
-  return document.getElementById('messages');
+  const main = document.querySelector('war-chat-main');
+  return main ? main.querySelector('#messages') : document.getElementById('messages');
 }
 
 function getMessagesInner() {
@@ -57,105 +58,39 @@ export function renderMessage(m, isNoteToSelf) {
   const container = getMessagesContainer();
   const inner = getMessagesInner();
   if (!container || !inner) return;
-  const div = document.createElement('div');
   const isSelf = m.peer === state.currentUsername;
-  if (isSelf || isNoteToSelf || m.from === '_system') {
-    div.className = 'msg note';
-  } else {
-    div.className = 'msg ' + (m.from === state.currentUsername ? 'sent' : 'received');
-  }
-  div.innerHTML = (isSelf || isNoteToSelf || m.from === '_system') ? formatMessage(m.text) : `<span class="meta">${escapeHtml(m.from)}</span><br>${formatMessage(m.text)}`;
-  inner.appendChild(div);
+  const kind = (isSelf || isNoteToSelf || m.from === '_system') ? 'note' : (m.from === state.currentUsername ? 'sent' : 'received');
+  const el = document.createElement('war-chat-message');
+  el.setAttribute('from', m.from || '');
+  el.setAttribute('text', m.text || '');
+  el.setAttribute('kind', kind);
+  inner.appendChild(el);
   container.scrollTop = container.scrollHeight;
 }
 
 export async function renderGroupInvites() {
-  const section = document.getElementById('group-invites-section');
-  const listEl = document.getElementById('group-invites-list');
-  if (!section || !listEl) return;
+  const main = document.querySelector('war-chat-main');
+  const el = main ? main.querySelector('war-chat-group-invites') : document.getElementById('group-invites-section');
+  if (!el || el.tagName !== 'WAR-CHAT-GROUP-INVITES') return;
   const invites = await db.getPendingGroupInvites();
-  if (invites.length === 0) {
-    listEl.innerHTML = '';
-    section.classList.add('hidden');
-    return;
-  }
-  section.classList.remove('hidden');
-  listEl.innerHTML = '';
-  for (const inv of invites) {
-    const li = document.createElement('li');
-    li.className = 'group-invite-row';
-    li.innerHTML = `
-      <div class="group-invite-info">
-        <div class="group-invite-text">${escapeHtml(inv.from)} invited you to "${escapeHtml(inv.name)}"</div>
-      </div>
-      <div class="group-invite-actions">
-        <button type="button" data-action="accept" data-testid="group-invite-accept" data-group-id="${escapeHtml(inv.id)}">Accept</button>
-        <button type="button" data-action="decline" data-testid="group-invite-decline" data-group-id="${escapeHtml(inv.id)}">Decline</button>
-      </div>
-    `;
-    li.querySelector('[data-action="accept"]').onclick = (e) => {
-      e.stopPropagation();
-      if (!inv || !inv.id) return;
-      groups.acceptGroupInvite(inv).then(() => {
-        renderGroupInvites();
-        renderChatList(getSelectedPeerFromRoute());
-        navigate('chat', 'group/' + inv.id);
-      }).catch((err) => {
-        console.error(err);
-        alert('Accept failed: ' + (err && err.message));
-      });
-    };
-    li.querySelector('[data-action="decline"]').onclick = (e) => {
-      e.stopPropagation();
-      groups.declineGroupInvite(inv.id).then(() => {
-        renderGroupInvites();
-        renderChatList(getSelectedPeerFromRoute());
-      }).catch((err) => {
-        console.error(err);
-        alert('Decline failed: ' + (err && err.message));
-      });
-    };
-    listEl.appendChild(li);
-  }
+  el.invites = invites;
 }
 
 export async function renderChatList(selectedPeer) {
-  const list = document.getElementById('chat-list');
-  const empty = document.getElementById('chat-list-empty');
-  if (!list) return;
+  const chatListEl = document.getElementById('chat-list');
+  if (!chatListEl || chatListEl.tagName !== 'WAR-CHAT-CHAT-LIST') return;
   await renderGroupInvites();
   const convos = await db.getConversations();
-
-  list.innerHTML = '';
-  if (convos.length === 0) {
-    empty.classList.remove('hidden');
-  } else {
-    empty.classList.add('hidden');
-    for (const c of convos) {
-      const li = document.createElement('li');
-      const isSelf = c.peer === state.currentUsername;
-      const isGroup = groups.isGroupPeer(c.peer);
-      const displayName = isSelf ? 'Saved Messages' : (c.groupName || (isGroup ? 'Group' : c.peer));
-      const navParam = isGroup ? 'group/' + groups.groupPeerId(c.peer) : c.peer;
-      li.className = 'chat-row' + (c.peer === selectedPeer ? ' selected' : '');
-      li.innerHTML = `
-        <div class="chat-avatar">${isSelf ? '&#128190;' : (isGroup ? '&#128101;' : (c.peer[0] || '?').toUpperCase())}</div>
-        <div class="chat-info">
-          <div class="chat-name">${escapeHtml(displayName)}</div>
-          <div class="chat-preview">${escapeHtml(c.lastMsg || 'No messages')}</div>
-        </div>
-        <div class="chat-time">${formatTime(c.lastTs)}</div>
-      `;
-      li.onclick = () => navigate('chat', navParam);
-      list.appendChild(li);
-    }
-  }
+  chatListEl.conversations = convos;
+  chatListEl.selectedPeer = selectedPeer;
+  chatListEl.currentUsername = state.currentUsername;
 }
 
 export async function renderMainView(selectedPeer) {
-  const layout = document.getElementById('layoutSplit');
-  const chatPane = document.getElementById('chat-pane');
-  const chatEmpty = document.getElementById('chat-empty');
+  const main = document.querySelector('war-chat-main');
+  const layout = main ? main.querySelector('#layoutSplit') : document.getElementById('layoutSplit');
+  const chatPane = main ? main.querySelector('#chat-pane') : document.getElementById('chat-pane');
+  const chatEmpty = main ? main.querySelector('#chat-empty') : document.getElementById('chat-empty');
   if (layout) layout.classList.toggle('has-chat', !!selectedPeer);
   if (chatPane) chatPane.style.display = selectedPeer ? 'flex' : 'none';
   if (chatEmpty) chatEmpty.style.display = selectedPeer ? 'none' : 'flex';
@@ -172,18 +107,12 @@ export async function openChat(recipient) {
     inner.innerHTML = '';
     const isSelf = recipient === state.currentUsername;
     msgs.forEach((m) => {
-      const div = document.createElement('div');
-      if (isSelf) {
-        div.className = 'msg note';
-        div.innerHTML = formatMessage(m.text);
-      } else if (m.from === '_system') {
-        div.className = 'msg note';
-        div.innerHTML = formatMessage(m.text);
-      } else {
-        div.className = 'msg ' + (m.from === state.currentUsername ? 'sent' : 'received');
-        div.innerHTML = `<span class="meta">${escapeHtml(m.from)}</span><br>${formatMessage(m.text)}`;
-      }
-      inner.appendChild(div);
+      const kind = isSelf || m.from === '_system' ? 'note' : (m.from === state.currentUsername ? 'sent' : 'received');
+      const el = document.createElement('war-chat-message');
+      el.setAttribute('from', m.from || '');
+      el.setAttribute('text', m.text || '');
+      el.setAttribute('kind', kind);
+      inner.appendChild(el);
     });
     container.scrollTop = container.scrollHeight;
   }
@@ -196,13 +125,13 @@ export function showView(name, param) {
 
   document.body.classList.toggle('profile-active', name === 'profile');
 
-  const header = document.getElementById('header');
-  const actions = document.getElementById('headerActions');
+  const headerEl = document.getElementById('header');
+  const headerWrapper = headerEl?.closest('header');
 
   if (name === 'setup') {
-    header.classList.add('hidden');
+    if (headerWrapper) headerWrapper.classList.add('hidden');
   } else {
-    header.classList.remove('hidden');
+    if (headerWrapper) headerWrapper.classList.remove('hidden');
   }
 
   if (name === 'main') {
@@ -213,53 +142,46 @@ export function showView(name, param) {
       else if (groups.isGroupPeer(param)) {
         headerTitle = 'Group';
         db.getGroup(groups.groupPeerId(param)).then((g) => {
-          const h = document.querySelector('.header h1');
-          if (h && g) h.textContent = g.name;
+          if (headerEl && g) headerEl.setAttribute('title', g.name);
         });
       } else headerTitle = param;
     }
-    const h1 = document.querySelector('.header h1');
-    if (h1) h1.textContent = headerTitle;
-    const isMobile = typeof window !== 'undefined' && window.matchMedia('(max-width: 768px)').matches;
-    const newChatBtn = (isMobile && !param) ? '<button class="btn-icon" id="btnNewChatHeader" title="New chat">&#10133;</button>' : '';
-    actions.innerHTML = (param ? '<button class="btn-icon" id="btnBack" title="Back">&#8592;</button>' : '') +
-      (param && groups.isGroupPeer(param) ? '<button class="btn-icon" id="btnAddMember" title="Add member">&#10133;</button><button class="btn-icon" id="btnLeaveGroup" title="Leave group">&#128473;</button>' : '') +
-      newChatBtn +
-      '<button class="btn-icon" id="btnProfile" title="Profile">&#9776;</button>' +
-      '<button class="btn-icon" id="btnLogout" title="Log out">&#128274;</button>';
-    const btnBack = document.getElementById('btnBack');
-    if (btnBack) btnBack.onclick = () => navigate('chats');
-    const btnAddMember = document.getElementById('btnAddMember');
-    if (btnAddMember) btnAddMember.onclick = () => showAddMemberModal();
-    const btnLeaveGroup = document.getElementById('btnLeaveGroup');
-    if (btnLeaveGroup) btnLeaveGroup.onclick = () => leaveGroupAndNavigate();
-    const btnNewChatHeader = document.getElementById('btnNewChatHeader');
-    if (btnNewChatHeader) btnNewChatHeader.onclick = () => showNewChatModal();
-    const btnProfile = document.getElementById('btnProfile');
-    if (btnProfile) btnProfile.onclick = () => navigate('profile');
-    const btnLogout = document.getElementById('btnLogout');
-    if (btnLogout) btnLogout.onclick = () => doLogout();
-    const layoutSplit = document.getElementById('layoutSplit');
-    const chatPane = document.getElementById('chat-pane');
-    const chatEmpty = document.getElementById('chat-empty');
+    if (headerEl) {
+      headerEl.setAttribute('title', headerTitle);
+      headerEl.toggleAttribute('show-back', !!param);
+      headerEl.toggleAttribute('show-add-member', !!(param && groups.isGroupPeer(param)));
+      headerEl.toggleAttribute('show-leave-group', !!(param && groups.isGroupPeer(param)));
+      const isMobile = typeof window !== 'undefined' && window.matchMedia('(max-width: 768px)').matches;
+      headerEl.toggleAttribute('show-new-chat', isMobile && !param);
+      headerEl.setAttribute('show-profile', '');
+      headerEl.setAttribute('show-logout', '');
+    }
+    const layoutSplit = document.querySelector('war-chat-main')?.querySelector('#layoutSplit') || document.getElementById('layoutSplit');
+    const chatPane = document.querySelector('war-chat-main')?.querySelector('#chat-pane') || document.getElementById('chat-pane');
+    const chatEmpty = document.querySelector('war-chat-main')?.querySelector('#chat-empty') || document.getElementById('chat-empty');
     if (layoutSplit) layoutSplit.classList.toggle('has-chat', !!param);
     if (chatPane) chatPane.style.display = param ? 'flex' : 'none';
     if (chatEmpty) chatEmpty.style.display = param ? 'none' : 'flex';
   } else if (name === 'profile') {
-    const h1 = document.querySelector('.header h1');
-    if (h1) h1.textContent = 'Profile';
-    actions.innerHTML = '<button class="btn-icon" id="btnBackProfile" title="Back">&#8592;</button>' +
-      '<button class="btn-icon" id="btnLogout" title="Log out">&#128274;</button>';
-    const btnBackProfile = document.getElementById('btnBackProfile');
-    if (btnBackProfile) btnBackProfile.onclick = () => {
-      const h = document.querySelector('.header h1');
-      if (h) h.textContent = 'War Chat';
-      navigate('chats');
-    };
-    const btnLogoutProfile = document.getElementById('btnLogout');
-    if (btnLogoutProfile) btnLogoutProfile.onclick = () => doLogout();
+    if (headerEl) {
+      headerEl.setAttribute('title', 'Profile');
+      headerEl.removeAttribute('show-back');
+      headerEl.removeAttribute('show-add-member');
+      headerEl.removeAttribute('show-leave-group');
+      headerEl.removeAttribute('show-new-chat');
+      headerEl.removeAttribute('show-profile');
+      headerEl.setAttribute('show-back', '');
+      headerEl.setAttribute('show-logout', '');
+    }
   } else {
-    actions.innerHTML = '';
+    if (headerEl) {
+      headerEl.removeAttribute('show-back');
+      headerEl.removeAttribute('show-add-member');
+      headerEl.removeAttribute('show-leave-group');
+      headerEl.removeAttribute('show-new-chat');
+      headerEl.removeAttribute('show-profile');
+      headerEl.removeAttribute('show-logout');
+    }
   }
 }
 
@@ -271,12 +193,16 @@ async function leaveGroupAndNavigate() {
   render();
 }
 
+export { leaveGroupAndNavigate };
+
 function doLogout() {
   auth.logout();
   resetSetupView();
   navigate('setup');
   render();
 }
+
+export { doLogout };
 
 export function resetSetupView() {
   const setupMnemonic = document.getElementById('setup-mnemonic');
@@ -583,7 +509,7 @@ export async function showNewChatModal() {
   const searchInput = document.getElementById('newChatSearchModal');
   if (!modal || !searchInput) return;
   searchInput.value = '';
-  modal.classList.add('visible');
+  modal.setAttribute('open', '');
   searchInput.focus();
   const users = await api.fetchUsers();
   renderUserList(users);
@@ -609,7 +535,7 @@ function renderUserList(users, query) {
     li.className = 'user-row';
     li.innerHTML = `<div class="user-avatar">${(username[0] || '?').toUpperCase()}</div><span class="user-name">${escapeHtml(username)}</span>`;
     li.onclick = () => {
-      document.getElementById('newChatModal').classList.remove('visible');
+      document.getElementById('newChatModal')?.removeAttribute('open');
       document.getElementById('newChatSearchModal').value = '';
       navigate('chat', username);
     };
@@ -625,7 +551,7 @@ export async function showNewGroupModal() {
   if (!modal || !nameInput || !listEl) return;
   nameInput.value = '';
   newGroupSelectedUsers = new Set();
-  modal.classList.add('visible');
+  modal.setAttribute('open', '');
   nameInput.focus();
   const users = await api.fetchUsers();
   listEl.innerHTML = '';
@@ -668,7 +594,7 @@ export async function createGroupFromModal() {
   }
   try {
     const { groupId } = await groups.createGroup(groupName, members);
-    if (modal) modal.classList.remove('visible');
+    if (modal) modal.removeAttribute('open');
     if (nameInput) nameInput.value = '';
     newGroupSelectedUsers = new Set();
     navigate('chat', 'group/' + groupId);
@@ -687,7 +613,7 @@ export async function showAddMemberModal() {
   const group = await db.getGroup(groupId);
   if (!group) return;
   addMemberSelectedUser = null;
-  modal.classList.add('visible');
+  modal.setAttribute('open', '');
   const allUsers = await api.fetchUsers();
   const membersSet = new Set(group.members);
   const candidates = allUsers.filter((u) => !membersSet.has(u));
@@ -720,7 +646,7 @@ export async function addMemberToGroupFromModal() {
   try {
     await groups.addMemberToGroup(addMemberSelectedUser);
     const modal = document.getElementById('addMemberModal');
-    if (modal) modal.classList.remove('visible');
+    if (modal) modal.removeAttribute('open');
     addMemberSelectedUser = null;
     renderChatList(getSelectedPeerFromRoute());
   } catch (e) {

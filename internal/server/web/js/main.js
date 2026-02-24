@@ -10,8 +10,8 @@ import { SESSION_MNEMONIC } from './config.js';
 import * as auth from './auth.js';
 import * as api from './api.js';
 import * as passkey from './passkey.js';
-import { navigate } from './app.js';
-import { render, resetSetupView, showNewChatModal, showNewGroupModal, createGroupFromModal, showAddMemberModal, addMemberToGroupFromModal, sendMessageFromInput } from './app.js';
+import { navigate, render, resetSetupView, showNewChatModal, showNewGroupModal, createGroupFromModal, showAddMemberModal, addMemberToGroupFromModal, sendMessageFromInput, leaveGroupAndNavigate, doLogout, renderGroupInvites, renderChatList, getSelectedPeerFromRoute } from './app.js';
+import * as groups from './groups.js';
 import { generateMnemonic } from './utils.js';
 import { encryptMessageForStorage } from './crypto-storage.js';
 
@@ -222,18 +222,59 @@ async function init() {
   const btnNewGroup = document.getElementById('btnNewGroup');
   if (btnNewGroup) btnNewGroup.onclick = () => showNewGroupModal();
 
+  // Header actions (war-chat-header component)
+  document.addEventListener('war-chat-header-action', (e) => {
+    const action = e.detail?.action;
+    if (action === 'back') navigate('chats');
+    else if (action === 'add-member') showAddMemberModal();
+    else if (action === 'leave-group') leaveGroupAndNavigate();
+    else if (action === 'new-chat') showNewChatModal();
+    else if (action === 'profile') navigate('profile');
+    else if (action === 'logout') doLogout();
+  });
+
+  // Chat list selection (war-chat-chat-list component)
+  document.addEventListener('war-chat-select-peer', (e) => {
+    if (e.detail?.peer) navigate('chat', e.detail.peer);
+  });
+
+  // Group invites (war-chat-group-invites component)
+  document.addEventListener('war-chat-group-invite-accept', (e) => {
+    const inv = e.detail?.invite;
+    if (!inv?.id) return;
+    groups.acceptGroupInvite(inv).then(() => {
+      renderGroupInvites();
+      renderChatList(getSelectedPeerFromRoute());
+      navigate('chat', 'group/' + inv.id);
+    }).catch((err) => {
+      console.error(err);
+      alert('Accept failed: ' + (err && err.message));
+    });
+  });
+  document.addEventListener('war-chat-group-invite-decline', (e) => {
+    const inv = e.detail?.invite;
+    if (!inv?.id) return;
+    groups.declineGroupInvite(inv.id).then(() => {
+      renderGroupInvites();
+      renderChatList(getSelectedPeerFromRoute());
+    }).catch((err) => {
+      console.error(err);
+      alert('Decline failed: ' + (err && err.message));
+    });
+  });
+
   // Modals
   const newChatModal = document.getElementById('newChatModal');
   if (newChatModal) {
     const btnCancel = document.getElementById('btnNewChatModalCancel');
     if (btnCancel) btnCancel.onclick = () => {
-      newChatModal.classList.remove('visible');
+      newChatModal.removeAttribute('open');
       const search = document.getElementById('newChatSearchModal');
       if (search) search.value = '';
     };
     newChatModal.onclick = (e) => {
       if (e.target === newChatModal) {
-        newChatModal.classList.remove('visible');
+        newChatModal.removeAttribute('open');
         const search = document.getElementById('newChatSearchModal');
         if (search) search.value = '';
       }
@@ -244,7 +285,7 @@ async function init() {
   if (newGroupModal) {
     const btnCancel = document.getElementById('btnNewGroupCancel');
     if (btnCancel) btnCancel.onclick = () => {
-      newGroupModal.classList.remove('visible');
+      newGroupModal.removeAttribute('open');
       const nameInput = document.getElementById('newGroupName');
       if (nameInput) nameInput.value = '';
     };
@@ -252,7 +293,7 @@ async function init() {
     if (btnCreate) btnCreate.onclick = () => createGroupFromModal();
     newGroupModal.onclick = (e) => {
       if (e.target === newGroupModal) {
-        newGroupModal.classList.remove('visible');
+        newGroupModal.removeAttribute('open');
         const nameInput = document.getElementById('newGroupName');
         if (nameInput) nameInput.value = '';
       }
@@ -263,13 +304,13 @@ async function init() {
   if (addMemberModal) {
     const btnCancel = document.getElementById('btnAddMemberCancel');
     if (btnCancel) btnCancel.onclick = () => {
-      addMemberModal.classList.remove('visible');
+      addMemberModal.removeAttribute('open');
     };
     const btnConfirm = document.getElementById('btnAddMemberConfirm');
     if (btnConfirm) btnConfirm.onclick = () => addMemberToGroupFromModal();
     addMemberModal.onclick = (e) => {
       if (e.target === addMemberModal) {
-        addMemberModal.classList.remove('visible');
+        addMemberModal.removeAttribute('open');
       }
     };
   }

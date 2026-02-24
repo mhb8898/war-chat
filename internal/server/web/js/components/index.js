@@ -2,6 +2,7 @@
 
 import './wc-message.js';
 import './wc-chat-list.js';
+import './wc-group-invites.js';
 import './wc-header.js';
 import './wc-setup.js';
 import './wc-profile.js';

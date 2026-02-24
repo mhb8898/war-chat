@@ -10,12 +10,8 @@ customElements.define('war-chat-main', class WarChatMain extends HTMLElement {
             <button id="btnNewChat" style="width:100%">New chat</button>
             <button id="btnNewGroup" style="width:100%;margin-top:0.25rem">New group</button>
           </div>
-          <div id="group-invites-section" class="group-invites-section hidden" data-testid="group-invites-section">
-            <div class="group-invites-title">Group invites</div>
-            <ul id="group-invites-list" class="group-invites-list"></ul>
-          </div>
-          <ul id="chat-list" class="chat-list"></ul>
-          <div id="chat-list-empty" class="empty-state hidden">No chats yet. Start a new chat above.</div>
+          <war-chat-group-invites id="group-invites-section" class="group-invites-section hidden"></war-chat-group-invites>
+          <war-chat-chat-list id="chat-list" class="chat-list"></war-chat-chat-list>
         </aside>
         <div class="content-area">
           <div id="chat-pane" class="view-chat">

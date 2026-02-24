@@ -1,6 +1,7 @@
 // War Chat - unit tests for renderGroupInvites (empty list clears DOM)
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import './components/wc-group-invites.js';
 import * as db from './db.js';
 import { renderGroupInvites } from './app.js';
 
@@ -20,24 +21,21 @@ vi.mock('./db.js', () => ({
 describe('renderGroupInvites', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    document.body.innerHTML = `
-      <div id="group-invites-section" class="">
-        <ul id="group-invites-list">
-          <li>old invite row</li>
-        </ul>
-      </div>
-    `;
+    document.body.innerHTML = '';
+    const section = document.createElement('war-chat-group-invites');
+    section.id = 'group-invites-section';
+    document.body.appendChild(section);
   });
 
   it('clears list and hides section when there are no invites', async () => {
     db.getPendingGroupInvites.mockResolvedValue([]);
     await renderGroupInvites();
     const section = document.getElementById('group-invites-section');
-    const listEl = document.getElementById('group-invites-list');
+    const listEl = section?.querySelector('ul');
     expect(section).toBeTruthy();
     expect(section.classList.contains('hidden')).toBe(true);
-    expect(listEl.innerHTML).toBe('');
-    expect(listEl.querySelectorAll('li')).toHaveLength(0);
+    expect(listEl?.innerHTML ?? '').toBe('');
+    expect(listEl?.querySelectorAll('li') ?? []).toHaveLength(0);
   });
 
   it('shows section and populates list when invites exist', async () => {
@@ -46,10 +44,10 @@ describe('renderGroupInvites', () => {
     ]);
     await renderGroupInvites();
     const section = document.getElementById('group-invites-section');
-    const listEl = document.getElementById('group-invites-list');
+    const listEl = section?.querySelector('ul');
     expect(section.classList.contains('hidden')).toBe(false);
-    expect(listEl.querySelectorAll('li.group-invite-row')).toHaveLength(1);
-    expect(listEl.textContent).toContain('alice');
-    expect(listEl.textContent).toContain('Group 1');
+    expect(listEl?.querySelectorAll('li.group-invite-row')).toHaveLength(1);
+    expect(listEl?.textContent).toContain('alice');
+    expect(listEl?.textContent).toContain('Group 1');
   });
 });

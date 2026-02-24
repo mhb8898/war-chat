@@ -84,7 +84,14 @@
       border-bottom: 1px solid #0f3460;
       flex-shrink: 0;
     }
-    .header h1 {
+    war-chat-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex: 1;
+      min-width: 0;
+    }
+    war-chat-header h1 {
       margin: 0;
       font-size: 1.25rem;
       white-space: nowrap;
@@ -93,7 +100,7 @@
       min-width: 0;
       flex: 1;
     }
-    .header-actions { display: flex; gap: 0.5rem; align-items: center; flex-shrink: 0; }
+    war-chat-header .header-actions { display: flex; gap: 0.5rem; align-items: center; flex-shrink: 0; }
     .btn-icon {
       background: none;
       border: none;
@@ -288,34 +295,7 @@
     .group-invite-actions button { padding: 0.35rem 0.5rem; font-size: 0.8rem; }
     .hidden { display: none !important; }
     header.hidden { display: none !important; }
-    .new-chat-modal {
-      display: none;
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,0.6);
-      z-index: 100;
-      align-items: center;
-      justify-content: center;
-      padding: 1rem;
-    }
-    .new-chat-modal.visible {
-      display: flex;
-    }
-    .new-chat-modal .modal-inner {
-      background: #16213e;
-      border: 1px solid #0f3460;
-      border-radius: 8px;
-      padding: 1.5rem;
-      width: 100%;
-      max-width: 320px;
-      display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
-    }
-    .new-chat-modal .modal-inner input { margin: 0; }
-    .new-chat-modal .modal-inner .modal-actions { display: flex; gap: 0.5rem; justify-content: flex-end; }
-    .new-chat-modal .modal-inner { max-height: 80vh; }
-    .user-list { list-style: none; padding: 0; margin: 0; max-height: 240px; overflow-y: auto; }
+    header.hidden war-chat-header { display: none !important; } { list-style: none; padding: 0; margin: 0; max-height: 240px; overflow-y: auto; }
     .user-list li {
       padding: 0.75rem 1rem;
       cursor: pointer;
@@ -329,6 +309,9 @@
     .user-list .user-avatar { width: 36px; height: 36px; border-radius: 50%; background: #0f3460; display: flex; align-items: center; justify-content: center; font-weight: bold; flex-shrink: 0; }
     .user-list .user-name { flex: 1; }
     .user-list-empty { padding: 1rem; text-align: center; opacity: 0.8; }
+    .modal-slot-content { display: flex; flex-direction: column; gap: 0.75rem; max-height: 80vh; overflow: auto; }
+    .modal-slot-content input { margin: 0; }
+    .modal-slot-content .modal-actions { display: flex; gap: 0.5rem; justify-content: flex-end; }
     .app-footer {
       flex-shrink: 0;
       padding: 0.5rem 1rem;
@@ -341,104 +324,31 @@
 </head>
 <body>
   <div class="app">
-    <header class="header" id="header">
-      <h1>War Chat</h1>
-      <div class="header-actions" id="headerActions"></div>
+    <header class="header">
+      <war-chat-header id="header"></war-chat-header>
     </header>
 
     <main class="main">
       <!-- Setup / Login -->
       <div id="view-setup" class="view view-setup">
-        <h2>Welcome</h2>
-        <div id="setup-passkey-div">
-          <p>Sign in or create account with passkey:</p>
-          <button id="btnSignInPasskey">Sign in with passkey</button>
-          <button id="btnUsePasskey">Create passkey</button>
-        </div>
-        <div id="setup-mnemonic">
-          <p style="margin:1rem 0 0.5rem;opacity:0.8">Or use 12-word recovery phrase:</p>
-          <textarea id="mnemonic" placeholder="word1 word2 word3 ..." rows="3"></textarea>
-          <button id="btnGenerate">Generate new identity</button>
-          <button id="btnContinue">Continue</button>
-        </div>
-        <div id="setup-register" class="hidden">
-          <h2>Choose username</h2>
-          <p id="setup-register-passkey-hint" class="hidden" style="opacity:0.8;font-size:0.9rem">Enter username, then create passkey. This name will appear when switching between profiles.</p>
-          <input type="text" id="username" placeholder="Username" maxlength="32">
-          <button id="btnRegister">Register</button>
-          <button id="btnCreatePasskey" class="hidden">Create passkey</button>
-        </div>
+        <war-chat-setup></war-chat-setup>
       </div>
 
       <!-- Chats + Chat (split layout when logged in) -->
       <div id="view-main" class="view view-main">
-        <div class="layout-split" id="layoutSplit">
-          <aside class="sidebar">
-            <div class="new-chat-form">
-              <button id="btnNewChat" style="width:100%">New chat</button>
-              <button id="btnNewGroup" style="width:100%;margin-top:0.25rem">New group</button>
-            </div>
-            <div id="group-invites-section" class="group-invites-section hidden" data-testid="group-invites-section">
-              <div class="group-invites-title">Group invites</div>
-              <ul id="group-invites-list" class="group-invites-list"></ul>
-            </div>
-            <ul id="chat-list" class="chat-list"></ul>
-            <div id="chat-list-empty" class="empty-state hidden">
-              No chats yet. Start a new chat above.
-            </div>
-          </aside>
-          <div class="content-area">
-            <div id="chat-pane" class="view-chat">
-              <div id="messages"><div class="messages-inner"></div></div>
-              <div class="input-bar">
-                <textarea id="messageInput" placeholder="Type a message..." rows="1"></textarea>
-                <button id="btnSend">Send</button>
-              </div>
-            </div>
-            <div id="chat-empty" class="empty-state" style="flex:1;display:flex;align-items:center;justify-content:center;">
-              Select a chat or start a new one
-            </div>
-          </div>
-        </div>
+        <war-chat-main></war-chat-main>
       </div>
 
       <!-- Profile -->
       <div id="view-profile" class="view view-profile">
-        <h2>Profile</h2>
-        <p><strong>Username:</strong> <span id="profileUsername"></span></p>
-        <p>Share this link so others can message you:</p>
-        <div class="link-box" id="chatLink"></div>
-        <button id="btnCopyLink">Copy link</button>
-        <div id="qrcode"></div>
-        <hr>
-        <h3>Recovery phrase</h3>
-        <div id="profile-recovery-section">
-          <p>Your 12-word phrase. Save it to restore on another device.</p>
-          <button id="btnShowMnemonic">Show recovery phrase</button>
-          <div id="mnemonicDisplay" class="link-box hidden"></div>
-        </div>
-        <div id="profile-passkey-section" class="hidden">
-          <p>You use a passkey. Add a recovery phrase for backup?</p>
-          <button id="btnAddRecoveryPhrase">Add recovery phrase as backup</button>
-        </div>
-        <div id="profile-add-passkey-section" class="hidden">
-          <p>Add passkey for easier sign-in on this device.</p>
-          <button id="btnAddPasskey">Add passkey</button>
-        </div>
-        <hr>
-        <h3>Use on another device</h3>
-        <p>Export backup (encrypted). On the new device, enter your phrase and restore.</p>
-        <button id="btnExportBackup">Export backup</button>
-        <p>Restore: enter your 12-word phrase and paste the backup:</p>
-        <textarea id="restoreBackup" placeholder="Paste backup here" rows="2"></textarea>
-        <button id="btnRestoreBackup">Restore from backup</button>
+        <war-chat-profile></war-chat-profile>
       </div>
     </main>
     <footer class="app-footer" id="appFooter">War Chat</footer>
   </div>
 
-  <div id="newChatModal" class="new-chat-modal">
-    <div class="modal-inner">
+  <war-chat-modal id="newChatModal">
+    <div class="modal-slot-content">
       <label for="newChatSearchModal">Search users</label>
       <input type="text" id="newChatSearchModal" placeholder="Type to search..." maxlength="64" autocomplete="off">
       <ul id="newChatUserList" class="user-list"></ul>
@@ -447,10 +357,10 @@
         <button id="btnNewChatModalCancel">Cancel</button>
       </div>
     </div>
-  </div>
+  </war-chat-modal>
 
-  <div id="newGroupModal" class="new-chat-modal">
-    <div class="modal-inner">
+  <war-chat-modal id="newGroupModal">
+    <div class="modal-slot-content">
       <label for="newGroupName">Group name</label>
       <input type="text" id="newGroupName" placeholder="Group name" maxlength="64" autocomplete="off">
       <label>Add members</label>
@@ -461,10 +371,10 @@
         <button id="btnNewGroupCreate">Create group</button>
       </div>
     </div>
-  </div>
+  </war-chat-modal>
 
-  <div id="addMemberModal" class="new-chat-modal">
-    <div class="modal-inner">
+  <war-chat-modal id="addMemberModal">
+    <div class="modal-slot-content">
       <label>Add member to group</label>
       <ul id="addMemberUserList" class="user-list"></ul>
       <div id="addMemberUserListEmpty" class="user-list-empty hidden">No users to add</div>
@@ -473,7 +383,7 @@
         <button id="btnAddMemberConfirm">Add</button>
       </div>
     </div>
-  </div>
+  </war-chat-modal>
 
   <script src="qrcode.min.js"></script>
   <script src="wordlist.js"></script>
