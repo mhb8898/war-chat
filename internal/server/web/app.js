@@ -680,8 +680,7 @@ async function hasPasskeyCredentials() {
   });
 }
 
-async function restoreSessionWithPasskey() {
-  const result = await authenticatePasskey();
+async function restoreSessionWithPasskeyFromResult(result) {
   if (!result) return false;
   const { credentialId, prfResult, useStoredKey } = result;
   const rec = await getPasskeyCredentialByCredentialId(credentialId);
@@ -715,6 +714,32 @@ async function restoreSessionWithPasskey() {
   savePasskeySessionToStorage(rec.username, keypair.privateJwk, keypair.publicJwk);
   await saveSession(rec.username, 'passkey', null, 'passkey', credentialId);
   return true;
+}
+
+async function restoreSessionWithPasskey() {
+  const result = await authenticatePasskey();
+  return result ? restoreSessionWithPasskeyFromResult(result) : false;
+}
+
+/** If server no longer has this user (e.g. key was removed), re-register with same username and pubkey. Uses existing /keys/ and /register. */
+async function ensureRegisteredWithServer() {
+  if (!currentUsername || !keys?.publicKey) return;
+  const keysResp = await fetch(`${API_BASE}/keys/${encodeURIComponent(currentUsername)}`);
+  if (keysResp.ok) return; // already registered
+  if (keysResp.status !== 404) return;
+  const pubkey = await exportPubkeyToBase64(keys.publicKey);
+  const regResp = await fetch(`${API_BASE}/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: currentUsername, pubkey }),
+  });
+  if (regResp.status === 409) {
+    throw new Error('Username was taken by another user. Sign in with a different account.');
+  }
+  if (!regResp.ok) {
+    const msg = await regResp.text();
+    throw new Error(msg || 'Registration failed');
+  }
 }
 
 async function deriveSharedKey(privateKey, publicKey) {
@@ -1400,6 +1425,7 @@ async function init() {
     }
   }
   if (keys && currentUsername) {
+    ensureRegisteredWithServer().catch((e) => console.warn('Ensure registered:', e));
     migratePlainMessagesToEncrypted().catch((e) => console.warn('Message migration failed:', e));
   }
 
@@ -1460,14 +1486,20 @@ async function init() {
   const btnSignInPasskey = document.getElementById('btnSignInPasskey');
   if (btnSignInPasskey) btnSignInPasskey.onclick = async () => {
     try {
-      if (await restoreSessionWithPasskey()) {
+      const result = await authenticatePasskey();
+      if (!result) {
+        alert('No passkey found or authentication failed.');
+        return;
+      }
+      if (await restoreSessionWithPasskeyFromResult(result)) {
+        await ensureRegisteredWithServer();
         migratePlainMessagesToEncrypted().catch((e) => console.warn('Message migration failed:', e));
         render();
       } else {
         alert('No passkey found or authentication failed.');
       }
     } catch (e) {
-      alert('Passkey sign-in failed: ' + (e.message || e));
+      alert(e.message || 'Passkey sign-in failed.');
     }
   };
 
