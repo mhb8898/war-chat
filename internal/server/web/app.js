@@ -548,13 +548,16 @@ async function createPasskey(username) {
   const rpId = getRpId();
   const userId = crypto.getRandomValues(new Uint8Array(16));
   const displayName = (username && username.trim()) || 'War Chat user';
-  const options = {
+  const publicKeyBase = {
+    rp: { name: 'War Chat', id: rpId },
+    user: { id: userId, name: displayName, displayName },
+    pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
+    authenticatorSelection: { residentKey: 'preferred', userVerification: 'required' },
+    challenge: crypto.getRandomValues(new Uint8Array(32)),
+  };
+  const optionsWithPrf = {
     publicKey: {
-      rp: { name: 'War Chat', id: rpId },
-      user: { id: userId, name: displayName, displayName },
-      pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
-      authenticatorSelection: { residentKey: 'preferred', userVerification: 'required' },
-      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      ...publicKeyBase,
       extensions: {
         prf: {
           eval: {
@@ -564,24 +567,37 @@ async function createPasskey(username) {
       },
     },
   };
-  const credential = await navigator.credentials.create(options);
+  const optionsWithoutPrf = { publicKey: publicKeyBase };
+  let credential;
+  try {
+    credential = await navigator.credentials.create(optionsWithPrf);
+  } catch {
+    credential = await navigator.credentials.create(optionsWithoutPrf);
+  }
   if (!credential || !(credential instanceof PublicKeyCredential)) throw new Error('Passkey creation failed');
-  const ext = credential.getClientExtensionResults();
-  const prfResult = ext.prf?.results?.first;
-  if (!prfResult) throw new Error('PRF extension not supported');
   const credentialId = btoa(String.fromCharCode.apply(null, new Uint8Array(credential.rawId)))
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-  return { credentialId, prfResult: new Uint8Array(prfResult), credential };
+  const ext = credential.getClientExtensionResults();
+  const prfResultRaw = ext.prf?.results?.first;
+  if (prfResultRaw) {
+    return { credentialId, prfResult: new Uint8Array(prfResultRaw), credential };
+  }
+  const fallbackKey = crypto.getRandomValues(new Uint8Array(32));
+  const storedKeyB64 = btoa(String.fromCharCode.apply(null, fallbackKey));
+  return { credentialId, prfResult: fallbackKey, storedKeyB64, credential };
 }
 
 async function authenticatePasskey() {
   const rpId = getRpId();
-  const options = {
+  const publicKeyBase = {
+    rpId,
+    challenge: crypto.getRandomValues(new Uint8Array(32)),
+    allowCredentials: [],
+    userVerification: 'required',
+  };
+  const optionsWithPrf = {
     publicKey: {
-      rpId,
-      challenge: crypto.getRandomValues(new Uint8Array(32)),
-      allowCredentials: [],
-      userVerification: 'required',
+      ...publicKeyBase,
       extensions: {
         prf: {
           eval: {
@@ -591,14 +607,22 @@ async function authenticatePasskey() {
       },
     },
   };
-  const assertion = await navigator.credentials.get(options);
+  const optionsWithoutPrf = { publicKey: publicKeyBase };
+  let assertion;
+  try {
+    assertion = await navigator.credentials.get(optionsWithPrf);
+  } catch {
+    assertion = await navigator.credentials.get(optionsWithoutPrf);
+  }
   if (!assertion || !(assertion instanceof PublicKeyCredential)) return null;
-  const ext = assertion.getClientExtensionResults();
-  const prfResult = ext.prf?.results?.first;
-  if (!prfResult) return null;
   const credentialId = btoa(String.fromCharCode.apply(null, new Uint8Array(assertion.rawId)))
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-  return { credentialId, prfResult: new Uint8Array(prfResult) };
+  const ext = assertion.getClientExtensionResults();
+  const prfResultRaw = ext.prf?.results?.first;
+  if (prfResultRaw) {
+    return { credentialId, prfResult: new Uint8Array(prfResultRaw) };
+  }
+  return { credentialId, useStoredKey: true };
 }
 
 async function encryptKeypairWithPasskey(keypair, prfResult) {
@@ -621,9 +645,11 @@ async function decryptKeypairWithPasskey(encryptedB64, ivB64, prfResult) {
   return JSON.parse(new TextDecoder().decode(dec));
 }
 
-async function storePasskeyCredential(credentialId, username, encrypted, iv) {
+async function storePasskeyCredential(credentialId, username, encrypted, iv, storedKeyB64) {
+  const record = { credentialId, username: username || null, encryptedKeypair: encrypted, iv };
+  if (storedKeyB64 != null) record.storedKeyB64 = storedKeyB64;
   const tx = db.transaction(STORE_PASSKEY_CREDS, 'readwrite');
-  tx.objectStore(STORE_PASSKEY_CREDS).put({ credentialId, username: username || null, encryptedKeypair: encrypted, iv });
+  tx.objectStore(STORE_PASSKEY_CREDS).put(record);
   await new Promise((resolve) => (tx.oncomplete = resolve));
 }
 
@@ -657,10 +683,18 @@ async function hasPasskeyCredentials() {
 async function restoreSessionWithPasskey() {
   const result = await authenticatePasskey();
   if (!result) return false;
-  const { credentialId, prfResult } = result;
+  const { credentialId, prfResult, useStoredKey } = result;
   const rec = await getPasskeyCredentialByCredentialId(credentialId);
   if (!rec || !rec.username) return false;
-  const keypair = await decryptKeypairWithPasskey(rec.encryptedKeypair, rec.iv, prfResult);
+  let keypair;
+  if (prfResult) {
+    keypair = await decryptKeypairWithPasskey(rec.encryptedKeypair, rec.iv, prfResult);
+  } else if (useStoredKey && rec.storedKeyB64) {
+    const storedKey = new Uint8Array([...atob(rec.storedKeyB64)].map((c) => c.charCodeAt(0)));
+    keypair = await decryptKeypairWithPasskey(rec.encryptedKeypair, rec.iv, storedKey);
+  } else {
+    return false;
+  }
   const privateKey = await crypto.subtle.importKey(
     'jwk',
     keypair.privateJwk,
@@ -1018,11 +1052,11 @@ async function addRecoveryPhraseForPasskeyUser() {
 
 async function addPasskeyForMnemonicUser() {
   try {
-    const { credentialId, prfResult } = await createPasskey(currentUsername);
+    const { credentialId, prfResult, storedKeyB64 } = await createPasskey(currentUsername);
     const privateJwk = await crypto.subtle.exportKey('jwk', keys.privateKey);
     const publicJwk = await crypto.subtle.exportKey('jwk', keys.publicKey);
     const { encrypted, iv } = await encryptKeypairWithPasskey({ privateJwk, publicJwk }, prfResult);
-    await storePasskeyCredential(credentialId, currentUsername, encrypted, iv);
+    await storePasskeyCredential(credentialId, currentUsername, encrypted, iv, storedKeyB64);
     alert('Passkey added. You can now sign in with passkey on this device.');
     renderProfile();
   } catch (e) {
@@ -1385,10 +1419,10 @@ async function init() {
       if (!usernameInput) return;
       const username = usernameInput.value.trim().toLowerCase();
       if (!username) return alert('Enter a username first');
-      const { credentialId, prfResult } = await createPasskey(username);
+      const { credentialId, prfResult, storedKeyB64 } = await createPasskey(username);
       const kp = await generateKeypairForPasskey();
       const { encrypted, iv } = await encryptKeypairWithPasskey({ privateJwk: kp.privateJwk, publicJwk: kp.publicJwk }, prfResult);
-      await storePasskeyCredential(credentialId, username, encrypted, iv);
+      await storePasskeyCredential(credentialId, username, encrypted, iv, storedKeyB64);
       keys = { privateKey: kp.privateKey, publicKey: kp.publicKey };
       pendingPasskeyCredentialId = credentialId;
       const pubkey = await exportPubkeyToBase64(keys.publicKey);
