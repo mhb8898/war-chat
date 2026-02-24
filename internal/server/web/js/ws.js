@@ -46,8 +46,8 @@ function maybeNotify(from, text) {
         if (p === 'granted') new Notification('War Chat', { body: 'Message from ' + from });
       });
     }
+    playNotificationSound();
   }
-  playNotificationSound();
 }
 
 export function connectWS() {

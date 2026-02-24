@@ -75,6 +75,7 @@ export async function renderGroupInvites() {
   if (!section || !listEl) return;
   const invites = await db.getPendingGroupInvites();
   if (invites.length === 0) {
+    listEl.innerHTML = '';
     section.classList.add('hidden');
     return;
   }
@@ -94,6 +95,7 @@ export async function renderGroupInvites() {
     `;
     li.querySelector('[data-action="accept"]').onclick = (e) => {
       e.stopPropagation();
+      if (!inv || !inv.id) return;
       groups.acceptGroupInvite(inv).then(() => {
         renderGroupInvites();
         renderChatList(getSelectedPeerFromRoute());
@@ -237,6 +239,12 @@ export function showView(name, param) {
     if (btnProfile) btnProfile.onclick = () => navigate('profile');
     const btnLogout = document.getElementById('btnLogout');
     if (btnLogout) btnLogout.onclick = () => doLogout();
+    const layoutSplit = document.getElementById('layoutSplit');
+    const chatPane = document.getElementById('chat-pane');
+    const chatEmpty = document.getElementById('chat-empty');
+    if (layoutSplit) layoutSplit.classList.toggle('has-chat', !!param);
+    if (chatPane) chatPane.style.display = param ? 'flex' : 'none';
+    if (chatEmpty) chatEmpty.style.display = param ? 'none' : 'flex';
   } else if (name === 'profile') {
     const h1 = document.querySelector('.header h1');
     if (h1) h1.textContent = 'Profile';
