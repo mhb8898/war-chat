@@ -9,6 +9,7 @@ import (
 
 func (s *Server) setupRoutes() {
 	http.HandleFunc("/health", s.handleHealth)
+	http.HandleFunc("/version", s.handleVersion)
 	http.HandleFunc("/register", s.handleRegister)
 	http.HandleFunc("/users", s.handleUsers)
 	http.HandleFunc("/keys/", s.handleKeys)
@@ -24,6 +25,15 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"version": s.version})
 }
 
 func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {

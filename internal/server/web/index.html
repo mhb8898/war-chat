@@ -303,6 +303,14 @@
     .user-list .user-avatar { width: 36px; height: 36px; border-radius: 50%; background: #0f3460; display: flex; align-items: center; justify-content: center; font-weight: bold; flex-shrink: 0; }
     .user-list .user-name { flex: 1; }
     .user-list-empty { padding: 1rem; text-align: center; opacity: 0.8; }
+    .app-footer {
+      flex-shrink: 0;
+      padding: 0.5rem 1rem;
+      text-align: center;
+      font-size: 0.8rem;
+      opacity: 0.7;
+      border-top: 1px solid #0f3460;
+    }
   </style>
 </head>
 <body>
@@ -395,6 +403,7 @@
         <button id="btnRestoreBackup">Restore from backup</button>
       </div>
     </main>
+    <footer class="app-footer" id="appFooter">War Chat</footer>
   </div>
 
   <div id="newChatModal" class="new-chat-modal">

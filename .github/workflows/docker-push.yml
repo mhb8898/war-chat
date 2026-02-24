@@ -32,8 +32,10 @@ jobs:
         run: |
           if [[ "${{ github.ref }}" == refs/tags/* ]]; then
             echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
           else
             echo "tag=latest" >> $GITHUB_OUTPUT
+            echo "version=dev" >> $GITHUB_OUTPUT
           fi
 
       - name: Build and push
@@ -42,6 +44,7 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
+          build-args: VERSION=${{ steps.meta.outputs.version }}
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/war-chat:${{ steps.meta.outputs.tag }}
             ${{ secrets.DOCKERHUB_USERNAME }}/war-chat:latest

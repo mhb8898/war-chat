@@ -8,6 +8,8 @@ import (
 	"github.com/war-chat/war-chat/internal/server"
 )
 
+var Version = "dev"
+
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "-healthcheck" {
 		runHealthcheck()
@@ -24,7 +26,7 @@ func main() {
 		port = "8080"
 	}
 
-	_, err := server.New(dataDir)
+	_, err := server.New(dataDir, Version)
 	if err != nil {
 		log.Fatal(err)
 	}

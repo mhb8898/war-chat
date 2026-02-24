@@ -3,6 +3,7 @@
 
 ARG BUILDPLATFORM=linux/amd64
 ARG TARGETARCH=amd64
+ARG VERSION=dev
 
 FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
 WORKDIR /app
@@ -11,8 +12,9 @@ COPY go.mod go.sum ./
 ENV GOTOOLCHAIN=local
 RUN go mod download
 
+ARG VERSION=dev
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /war-chat ./cmd/server
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH go build -ldflags="-s -w -X main.Version=${VERSION}" -o /war-chat ./cmd/server
 
 # Minimal final image - scratch has zero OS surface (no shell, no packages)
 # Server makes no outbound HTTPS calls, so no ca-certificates needed
