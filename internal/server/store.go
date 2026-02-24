@@ -11,10 +11,10 @@ import (
 var ErrDuplicateUsername = errors.New("username already taken with a different key")
 
 type Store struct {
-	mu        sync.RWMutex
-	keysPath  string
+	mu         sync.RWMutex
+	keysPath   string
 	offlineDir string
-	keys      map[string]string
+	keys       map[string]string
 }
 
 func NewStore(dataDir string) (*Store, error) {
@@ -28,7 +28,7 @@ func NewStore(dataDir string) (*Store, error) {
 	s := &Store{
 		keysPath:   keysPath,
 		offlineDir: offlineDir,
-		keys:      make(map[string]string),
+		keys:       make(map[string]string),
 	}
 
 	if err := s.loadKeys(); err != nil && !os.IsNotExist(err) {

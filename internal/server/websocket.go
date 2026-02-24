@@ -63,10 +63,8 @@ func (h *Hub) Run() {
 					h.mu.Unlock()
 				}
 			}
-		} else {
-			// Recipient offline - message will be queued by the handler
-			// This path is for real-time relay; offline is handled in ServeWS
 		}
+		// Recipient offline: message is queued by the handler in ServeWS
 	}
 }
 
@@ -109,9 +107,9 @@ func (c *Client) readPump(store *Store) {
 	}()
 
 	c.conn.SetReadLimit(64 << 10)
-	c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	_ = c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 	c.conn.SetPongHandler(func(string) error {
-		c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		_ = c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 		return nil
 	})
 
@@ -135,7 +133,7 @@ func (c *Client) readPump(store *Store) {
 				PubKey   string `json:"pubkey"`
 			}
 			if json.Unmarshal(message, &m) == nil && m.Username != "" && m.PubKey != "" {
-				store.Register(m.Username, m.PubKey)
+				_ = store.Register(m.Username, m.PubKey)
 				c.username = m.Username
 
 				c.hub.mu.Lock()
@@ -179,25 +177,25 @@ func (c *Client) readPump(store *Store) {
 
 			incoming := map[string]interface{}{
 				"type":    "incoming",
-				"id":     msgID,
-				"from":   c.username,
+				"id":      msgID,
+				"from":    c.username,
 				"payload": m.Payload,
-				"nonce":  m.Nonce,
-				"ts":     ts,
+				"nonce":   m.Nonce,
+				"ts":      ts,
 			}
 			data, _ := json.Marshal(incoming)
 
 			if c.hub.IsOnline(m.To) {
 				c.hub.broadcast <- &broadcastMsg{recipient: m.To, data: data}
 			} else {
-				store.QueueOffline(m.To, msgID, c.username, m.Payload, m.Nonce, ts)
+				_ = store.QueueOffline(m.To, msgID, c.username, m.Payload, m.Nonce, ts)
 			}
 		case "delivered":
 			var m struct {
 				IDs []string `json:"ids"`
 			}
 			if json.Unmarshal(message, &m) == nil && c.username != "" && len(m.IDs) > 0 {
-				store.DeleteOffline(c.username, m.IDs)
+				_ = store.DeleteOffline(c.username, m.IDs)
 			}
 		}
 	}
@@ -213,16 +211,16 @@ func (c *Client) writePump() {
 	for {
 		select {
 		case message, ok := <-c.send:
-			c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			_ = c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if !ok {
-				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				_ = c.conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
 			if err := c.conn.WriteMessage(websocket.TextMessage, message); err != nil {
 				return
 			}
 		case <-ticker.C:
-			c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			_ = c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}

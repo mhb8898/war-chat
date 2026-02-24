@@ -32,8 +32,8 @@ type DeliveredMsg struct {
 
 // Server -> Client messages
 type OfflineMessagesMsg struct {
-	Type     string          `json:"type"`
-	Messages []OfflineMsg    `json:"messages"`
+	Type     string       `json:"type"`
+	Messages []OfflineMsg `json:"messages"`
 }
 
 type OfflineMsg struct {
@@ -45,8 +45,8 @@ type OfflineMsg struct {
 }
 
 type KeysResponseMsg struct {
-	Type  string            `json:"type"`
-	Keys  map[string]string `json:"keys"`
+	Type string            `json:"type"`
+	Keys map[string]string `json:"keys"`
 }
 
 type ErrorMsg struct {
