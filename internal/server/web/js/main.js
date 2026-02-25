@@ -8,7 +8,7 @@ import { state } from './state.js';
 import { API_BASE } from './config.js';
 import * as auth from './auth.js';
 import * as api from './api.js';
-import { navigate, render, showNewChatModal, showNewGroupModal, createGroupFromModal, showAddMemberModal, addMemberToGroupFromModal, sendMessageFromInput, leaveGroupAndNavigate, doLogout, renderGroupInvites, renderChatList, getSelectedPeerFromRoute } from './app.js';
+import { navigate, render, showNewChatModal, showNewGroupModal, createGroupFromModal, showAddMemberModal, addMemberToGroupFromModal, sendMessageFromInput, leaveGroupAndNavigate, doLogout, deleteChatWithPeer, deleteMessageInChat, renderGroupInvites, renderChatList, getSelectedPeerFromRoute } from './app.js';
 import * as groups from './groups.js';
 import { initSetup, setSetupCallbacks } from './setup.js';
 import { encryptMessageForStorage } from './crypto-storage.js';
@@ -73,13 +73,35 @@ async function init() {
     else if (action === 'add-member') showAddMemberModal();
     else if (action === 'leave-group') leaveGroupAndNavigate();
     else if (action === 'new-chat') showNewChatModal();
+    else if (action === 'new-group') showNewGroupModal();
     else if (action === 'profile') navigate('profile');
     else if (action === 'logout') doLogout();
+    else if (action === 'delete-chat') {
+      const param = getSelectedPeerFromRoute();
+      if (!param) return;
+      const peer = param.startsWith('group/') ? groups.peerFromGroupId(param.slice(6)) : param;
+      if (!confirm('Delete this chat and all messages?')) return;
+      deleteChatWithPeer(peer);
+    }
   });
 
   // Chat list selection (war-chat-chat-list component)
   document.addEventListener('war-chat-select-peer', (e) => {
     if (e.detail?.peer) navigate('chat', e.detail.peer);
+  });
+
+  // Chat list row menu (delete chat)
+  document.addEventListener('war-chat-chat-action', (e) => {
+    const { peer, action } = e.detail || {};
+    if (!peer || action !== 'delete-chat') return;
+    if (!confirm('Delete this chat and all messages?')) return;
+    deleteChatWithPeer(peer);
+  });
+
+  // Message context menu (delete single message)
+  document.addEventListener('war-chat-message-action', (e) => {
+    const { action, peer, msgId } = e.detail || {};
+    if (action === 'delete' && peer && msgId) deleteMessageInChat(peer, msgId);
   });
 
   // Group invites (war-chat-group-invites component)

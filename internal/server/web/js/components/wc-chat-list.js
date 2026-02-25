@@ -2,6 +2,7 @@
 
 import { escapeHtml, formatTime } from '../utils.js';
 import { isGroupPeer, groupPeerId } from '../groups.js';
+import { showMenu } from './wc-menu.js';
 
 customElements.define('war-chat-chat-list', class WarChatChatList extends HTMLElement {
   constructor() {
@@ -61,10 +62,24 @@ customElements.define('war-chat-chat-list', class WarChatChatList extends HTMLEl
           <div class="chat-preview">${escapeHtml(c.lastMsg || 'No messages')}</div>
         </div>
         <div class="chat-time">${formatTime(c.lastTs)}</div>
+        ${!isSelf ? '<button type="button" class="chat-row-menu-btn btn-icon" title="Options">&#8942;</button>' : ''}
       `;
-      li.onclick = () => {
+      const menuBtn = li.querySelector('.chat-row-menu-btn');
+      const rowPeer = c.peer;
+      li.onclick = (e) => {
+        if (e.target.closest('.chat-row-menu-btn')) return;
         this.dispatchEvent(new CustomEvent('war-chat-select-peer', { detail: { peer: navParam }, bubbles: true }));
       };
+      if (menuBtn) {
+        menuBtn.onclick = (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          const items = [{ label: 'Delete chat', action: 'delete-chat' }];
+          showMenu(menuBtn, items, (action) => {
+            this.dispatchEvent(new CustomEvent('war-chat-chat-action', { detail: { peer: rowPeer, action }, bubbles: true }));
+          });
+        };
+      }
       this.appendChild(li);
     }
   }

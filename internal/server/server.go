@@ -1,7 +1,9 @@
 package server
 
 import (
+	"crypto/rand"
 	"embed"
+	"encoding/hex"
 	"io/fs"
 	"log"
 	"net/http"
@@ -11,9 +13,10 @@ import (
 var webFS embed.FS
 
 type Server struct {
-	store   *Store
-	hub     *Hub
-	version string
+	store     *Store
+	hub       *Hub
+	version   string
+	adminToken string
 }
 
 func New(dataDir, version string) (*Server, error) {
@@ -28,9 +31,20 @@ func New(dataDir, version string) (*Server, error) {
 	hub := NewHub(store)
 	go hub.Run()
 
-	s := &Server{store: store, hub: hub, version: version}
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return nil, err
+	}
+	adminToken := hex.EncodeToString(b)
+
+	s := &Server{store: store, hub: hub, version: version, adminToken: adminToken}
 	s.setupRoutes()
 	return s, nil
+}
+
+// AdminToken returns the random token for the admin panel path. Used at startup to log the admin URL.
+func (s *Server) AdminToken() string {
+	return s.adminToken
 }
 
 func (s *Server) handleStatic() http.Handler {

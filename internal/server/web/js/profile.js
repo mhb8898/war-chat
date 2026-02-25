@@ -1,7 +1,7 @@
 // War Chat - profile view (backup, restore, recovery phrase, add passkey)
 
 import { state } from './state.js';
-import { API_BASE } from './config.js';
+import { API_BASE, DB_NAME } from './config.js';
 import { SESSION_MNEMONIC } from './config.js';
 import * as auth from './auth.js';
 import * as db from './db.js';
@@ -105,6 +105,41 @@ export function renderProfile() {
   if (btnExportBackup) btnExportBackup.onclick = exportBackup;
   const btnRestoreBackup = document.getElementById('btnRestoreBackup');
   if (btnRestoreBackup) btnRestoreBackup.onclick = restoreBackup;
+  const btnDeleteMyAccount = document.getElementById('btnDeleteMyAccount');
+  if (btnDeleteMyAccount) btnDeleteMyAccount.onclick = deleteMyAccount;
+}
+
+/** Delete the current user's account: remove from server so username can be reused, then clear local data and log out. */
+async function deleteMyAccount() {
+  if (!confirm('Delete your account? Your username will be removed from the server and all local data on this device will be cleared. You can create a new account with the same or different name later.')) return;
+  const username = state.currentUsername;
+  if (username) {
+    try {
+      const r = await fetch(`${API_BASE}/deregister`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username }),
+      });
+      if (!r.ok) {
+        const msg = await r.text();
+        console.warn('Deregister failed:', msg);
+      }
+    } catch (e) {
+      console.warn('Deregister request failed:', e);
+    }
+  }
+  if (state.db) {
+    state.db.close();
+    state.db = null;
+  }
+  auth.logout();
+  const req = indexedDB.deleteDatabase(DB_NAME);
+  function reload() {
+    window.location.reload();
+  }
+  req.onsuccess = reload;
+  req.onerror = reload;
+  req.onblocked = reload;
 }
 
 async function addRecoveryPhraseForPasskeyUser() {

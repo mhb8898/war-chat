@@ -291,6 +291,52 @@ export function hasPasskeyCredentials() {
   });
 }
 
+/** Delete all messages in a conversation with the given peer. */
+export async function deleteMessagesWithPeer(peer) {
+  const db = state.db;
+  const currentUsername = state.currentUsername;
+  if (!currentUsername || !db) return;
+  const raw = await new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_MSGS, 'readonly');
+    const req = tx.objectStore(STORE_MSGS).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  });
+  const byOwner = raw.filter((m) => m.owner === currentUsername);
+  const idsToDelete = [];
+  for (const r of byOwner) {
+    const m = await decryptMessageFromStorage(r);
+    if (m && m.peer === peer) idsToDelete.push(r.id);
+  }
+  if (idsToDelete.length === 0) return;
+  const tx = db.transaction(STORE_MSGS, 'readwrite');
+  const store = tx.objectStore(STORE_MSGS);
+  for (const id of idsToDelete) store.delete(id);
+  return new Promise((resolve) => (tx.oncomplete = resolve));
+}
+
+/** Delete a single message by id in the given peer conversation. */
+export async function deleteMessage(peer, msgId) {
+  const db = state.db;
+  const currentUsername = state.currentUsername;
+  if (!currentUsername || !db) return;
+  const raw = await new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_MSGS, 'readonly');
+    const req = tx.objectStore(STORE_MSGS).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  });
+  const byOwner = raw.filter((m) => m.owner === currentUsername);
+  for (const r of byOwner) {
+    const m = await decryptMessageFromStorage(r);
+    if (m && m.peer === peer && m.id === msgId) {
+      const tx = db.transaction(STORE_MSGS, 'readwrite');
+      tx.objectStore(STORE_MSGS).delete(r.id);
+      return new Promise((resolve) => (tx.oncomplete = resolve));
+    }
+  }
+}
+
 /** Raw getAll for messages (for migration). */
 export function getAllMessagesRaw() {
   const db = state.db;

@@ -27,12 +27,13 @@ func main() {
 		port = "8080"
 	}
 
-	_, err := server.New(dataDir, Version)
+	s, err := server.New(dataDir, Version)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	log.Printf("War Chat server listening on :%s", port)
+	log.Printf("Admin panel: http://localhost:%s/admin/%s", port, s.AdminToken())
 	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
 

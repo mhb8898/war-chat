@@ -32,6 +32,10 @@ customElements.define('war-chat-profile', class WarChatProfile extends HTMLEleme
       <p>Restore: enter your 12-word phrase and paste the backup:</p>
       <textarea id="restoreBackup" placeholder="Paste backup here" rows="2"></textarea>
       <button id="btnRestoreBackup">Restore from backup</button>
+      <hr>
+      <h3>Account</h3>
+      <button id="btnDeleteMyAccount" class="btn-danger">Delete my account</button>
+      <p class="profile-danger-hint">This will remove your username from the server and all local data on this device. You can create a new account (same or different name) later.</p>
     `;
   }
 });

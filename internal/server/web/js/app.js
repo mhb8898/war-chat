@@ -62,6 +62,8 @@ export function renderMessage(m, isNoteToSelf) {
   el.setAttribute('from', m.from || '');
   el.setAttribute('text', m.text || '');
   el.setAttribute('kind', kind);
+  el.dataset.peer = m.peer || '';
+  el.dataset.msgId = m.id || '';
   inner.appendChild(el);
   container.scrollTop = container.scrollHeight;
 }
@@ -108,6 +110,8 @@ export async function openChat(recipient) {
       el.setAttribute('from', m.from || '');
       el.setAttribute('text', m.text || '');
       el.setAttribute('kind', kind);
+      el.dataset.peer = recipient;
+      el.dataset.msgId = m.id || '';
       inner.appendChild(el);
     });
     container.scrollTop = container.scrollHeight;
@@ -190,6 +194,42 @@ async function leaveGroupAndNavigate() {
 }
 
 export { leaveGroupAndNavigate };
+
+/** Delete all messages with a peer (chat or user). Caller should navigate away if viewing that chat. */
+export async function deleteChatWithPeer(peer) {
+  await db.deleteMessagesWithPeer(peer);
+  const current = getSelectedPeerFromRoute();
+  const currentPeer = current && (current.startsWith('group/') ? groups.peerFromGroupId(current.slice(6)) : current);
+  if (currentPeer === peer) {
+    navigate('chats');
+  }
+  render();
+}
+
+/** Delete a single message in the current conversation. */
+export async function deleteMessageInChat(peer, msgId) {
+  await db.deleteMessage(peer, msgId);
+  if (state.currentRecipient === peer) {
+    const msgs = await db.getMessages(peer);
+    const container = getMessagesContainer();
+    const inner = getMessagesInner();
+    if (container && inner) {
+      inner.innerHTML = '';
+      const isSelf = peer === state.currentUsername;
+      msgs.forEach((m) => {
+        const kind = isSelf || m.from === '_system' ? 'note' : (m.from === state.currentUsername ? 'sent' : 'received');
+        const el = document.createElement('war-chat-message');
+        el.setAttribute('from', m.from || '');
+        el.setAttribute('text', m.text || '');
+        el.setAttribute('kind', kind);
+        el.dataset.peer = peer;
+        el.dataset.msgId = m.id || '';
+        inner.appendChild(el);
+      });
+      container.scrollTop = container.scrollHeight;
+    }
+  }
+}
 
 function doLogout() {
   auth.logout();

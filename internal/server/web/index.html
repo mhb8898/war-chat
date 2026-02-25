@@ -123,11 +123,46 @@
       font-size: 1.25rem;
     }
     .btn-icon:hover { opacity: 0.8; }
+    .wc-menu-dropdown {
+      position: fixed;
+      z-index: 1000;
+      background: #16213e;
+      border: 1px solid #0f3460;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      min-width: 180px;
+      padding: 0.25rem 0;
+    }
+    .wc-menu-list { display: flex; flex-direction: column; }
+    .wc-menu-item {
+      display: block;
+      width: 100%;
+      padding: 0.75rem 1rem;
+      text-align: left;
+      background: none;
+      border: none;
+      color: #eee;
+      font-size: 1rem;
+      cursor: pointer;
+    }
+    .wc-menu-item:hover { background: #0f3460; }
     .main { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
     .view { display: none; flex-direction: column; height: 100%; }
     .view.active { display: flex !important; }
     .view:not(.active) { display: none !important; }
     .view-setup, .view-profile { padding: 1.5rem; flex: 1; }
+    .view-setup .setup-intro { margin: 0 0 1rem; opacity: 0.9; }
+    .view-setup .setup-primary { display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 1.5rem; }
+    .view-setup .btn-primary { width: 100%; }
+    .view-setup .btn-secondary { background: transparent; border: 1px solid #e94560; }
+    .view-setup .setup-fallback { margin-bottom: 0.5rem; }
+    .view-setup .btn-link { background: none; border: none; color: #8ab4f8; cursor: pointer; padding: 0.5rem 0; font-size: 0.9rem; text-decoration: underline; }
+    .view-setup .btn-link:hover { color: #a8c7fa; }
+    .view-setup .setup-mnemonic-box { margin-top: 0.5rem; padding: 1rem; border: 1px solid #0f3460; border-radius: 8px; }
+    .view-setup .setup-help { margin: 0 0 0.75rem; font-size: 0.9rem; opacity: 0.85; }
+    .view-setup .setup-error { color: #f87171; font-size: 0.875rem; margin: 0.5rem 0 0; }
+    .view-setup .setup-mnemonic-actions, .view-setup .setup-register-actions { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
+    .view-setup .setup-hint { opacity: 0.8; font-size: 0.9rem; margin: 0 0 0.5rem; }
     .view-profile { min-height: 0; overflow-y: auto; width: 100%; }
     body.profile-active .view-main { display: none !important; }
     .view-main { padding: 0; display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; height: 100%; position: relative; }
@@ -199,6 +234,12 @@
       text-align: left;
     }
     .chat-time { font-size: 0.75rem; opacity: 0.7; }
+    .chat-row-menu-btn {
+      flex-shrink: 0;
+      margin-left: 0.25rem;
+      opacity: 0.7;
+    }
+    .chat-row-menu-btn:hover { opacity: 1; }
     .empty-state {
       padding: 2rem;
       text-align: center;
@@ -278,6 +319,9 @@
       font-size: 0.875rem;
     }
     #qrcode { margin: 1rem 0; }
+    .btn-danger { background: #7f1d1d; }
+    .btn-danger:hover { background: #991b1b; }
+    .profile-danger-hint { font-size: 0.875rem; opacity: 0.85; margin-top: 0.5rem; }
     .new-chat-form {
       padding: 1rem;
       flex-shrink: 0;

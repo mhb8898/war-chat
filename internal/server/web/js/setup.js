@@ -23,7 +23,8 @@ export function resetSetupView() {
   const btnCreatePasskey = document.getElementById('btnCreatePasskey');
   const usernameInput = document.getElementById('username');
   const mnemonicInput = document.getElementById('mnemonic');
-  if (setupMnemonic) setupMnemonic.classList.remove('hidden');
+  const mnemonicError = document.getElementById('setup-mnemonic-error');
+  if (setupMnemonic) setupMnemonic.classList.add('hidden');
   if (setupPasskeyDiv) setupPasskeyDiv.classList.remove('hidden');
   if (setupRegister) setupRegister.classList.add('hidden');
   if (setupRegisterPasskeyHint) setupRegisterPasskeyHint.classList.add('hidden');
@@ -31,9 +32,37 @@ export function resetSetupView() {
   if (btnCreatePasskey) btnCreatePasskey.classList.add('hidden');
   if (usernameInput) usernameInput.value = '';
   if (mnemonicInput) mnemonicInput.value = '';
+  if (mnemonicError) {
+    mnemonicError.textContent = '';
+    mnemonicError.classList.add('hidden');
+  }
+}
+
+function showMnemonicError(msg) {
+  const el = document.getElementById('setup-mnemonic-error');
+  if (!el) return;
+  el.textContent = msg || '';
+  el.classList.toggle('hidden', !msg);
+}
+
+function validateMnemonic(mnemonic) {
+  const trimmed = (mnemonic || '').trim().toLowerCase();
+  if (!trimmed) return { ok: false, error: 'Enter your 12-word phrase.' };
+  const words = trimmed.split(/\s+/);
+  if (words.length !== 12) return { ok: false, error: 'Phrase must be exactly 12 words.' };
+  return { ok: true, mnemonic: trimmed };
 }
 
 export function initSetup() {
+  const btnToggleMnemonic = document.getElementById('btnToggleMnemonic');
+  if (btnToggleMnemonic) {
+    btnToggleMnemonic.onclick = () => {
+      const setupMnemonic = document.getElementById('setup-mnemonic');
+      if (setupMnemonic) setupMnemonic.classList.toggle('hidden');
+      showMnemonicError('');
+    };
+  }
+
   const btnUsePasskey = document.getElementById('btnUsePasskey');
   if (btnUsePasskey) btnUsePasskey.onclick = () => {
     document.getElementById('setup-mnemonic')?.classList.add('hidden');
@@ -115,9 +144,20 @@ export function initSetup() {
   const btnContinue = document.getElementById('btnContinue');
   if (btnContinue) btnContinue.onclick = async () => {
     const mnemonicEl = document.getElementById('mnemonic');
-    const mnemonic = (mnemonicEl && mnemonicEl.value.trim()) || '';
-    if (!mnemonic) return alert('Enter your 12-word phrase');
-    const kp = await auth.deriveKeypair(mnemonic);
+    const raw = (mnemonicEl && mnemonicEl.value) || '';
+    const { ok, mnemonic, error } = validateMnemonic(raw);
+    if (!ok) {
+      showMnemonicError(error);
+      return;
+    }
+    showMnemonicError('');
+    let kp;
+    try {
+      kp = await auth.deriveKeypair(mnemonic);
+    } catch (e) {
+      showMnemonicError(e.message || 'Invalid phrase. Check your 12 words.');
+      return;
+    }
     state.keys = kp;
     sessionStorage.setItem(SESSION_MNEMONIC, mnemonic);
     const existingUser = auth.getStoredUsername();

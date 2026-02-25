@@ -91,6 +91,14 @@ func (s *Store) Register(username, pubkey string) error {
 	return s.saveKeys()
 }
 
+// Deregister removes a user from the server so the username can be used again.
+func (s *Store) Deregister(username string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.keys, username)
+	return s.saveKeys()
+}
+
 func (s *Store) GetPubKey(username string) (string, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -331,6 +339,64 @@ func (s *Store) DeleteOffline(recipient string, ids []string) error {
 		}
 		path := filepath.Join(dir, id+".json")
 		_ = os.Remove(path)
+	}
+	return nil
+}
+
+// ResetUsers clears all registered users (keys.json).
+func (s *Store) ResetUsers() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.keys = make(map[string]string)
+	return s.saveKeys()
+}
+
+// ResetOffline removes all queued offline messages.
+func (s *Store) ResetOffline() error {
+	s.mu.RLock()
+	dir := s.offlineDir
+	s.mu.RUnlock()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		sub := filepath.Join(dir, e.Name())
+		subEntries, _ := os.ReadDir(sub)
+		for _, f := range subEntries {
+			if f.IsDir() {
+				continue
+			}
+			_ = os.Remove(filepath.Join(sub, f.Name()))
+		}
+		_ = os.Remove(sub)
+	}
+	return nil
+}
+
+// ResetGroups removes all group files.
+func (s *Store) ResetGroups() error {
+	s.mu.RLock()
+	dir := s.groupsDir
+	s.mu.RUnlock()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
+			continue
+		}
+		_ = os.Remove(filepath.Join(dir, e.Name()))
 	}
 	return nil
 }
