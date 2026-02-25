@@ -7,6 +7,26 @@ import (
 	"strings"
 )
 
+// escapeJSString escapes s for safe use inside a JavaScript double-quoted string.
+func escapeJSString(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch r {
+		case '\\':
+			b.WriteString(`\\`)
+		case '"':
+			b.WriteString(`\"`)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\r':
+			b.WriteString(`\r`)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
 func (s *Server) setupRoutes() {
 	http.HandleFunc("/health", s.handleHealth)
 	http.HandleFunc("/version", s.handleVersion)
@@ -223,6 +243,7 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 func (s *Server) serveAdminPage(w http.ResponseWriter, token string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	base := "/admin/" + token
+	baseEscaped := escapeJSString(base)
 	html := `<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>War Chat Admin</title>
@@ -238,7 +259,7 @@ button:hover{background:#ff6b6b;} button.danger{background:#0f3460;} #msg{margin
 <button data-action="reset-all" class="danger">Reset all (users + offline + groups)</button>
 <div id="msg"></div>
 <script>
-const base = "` + base + `";
+const base = "` + baseEscaped + `";
 document.querySelectorAll("button[data-action]").forEach(btn => {
   btn.onclick = async () => {
     const action = btn.dataset.action;

@@ -1,6 +1,6 @@
 // War Chat - chat list (conversations) component
 
-import { escapeHtml, formatTime } from '../utils.js';
+import { formatTime } from '../utils.js';
 import { isGroupPeer, groupPeerId } from '../groups.js';
 import { showMenu } from './wc-menu.js';
 
@@ -41,7 +41,7 @@ customElements.define('war-chat-chat-list', class WarChatChatList extends HTMLEl
       empty.className = 'empty-state hidden';
       empty.textContent = 'No chats yet. Start a new chat above.';
     }
-    this.innerHTML = '';
+    this.replaceChildren();
     if (list.length === 0) {
       empty.classList.remove('hidden');
       this.appendChild(empty);
@@ -55,22 +55,32 @@ customElements.define('war-chat-chat-list', class WarChatChatList extends HTMLEl
       const navParam = isGroup ? 'group/' + groupPeerId(c.peer) : c.peer;
       const li = document.createElement('li');
       li.className = 'chat-row' + (c.peer === selected ? ' selected' : '');
-      li.innerHTML = `
-        <div class="chat-avatar">${isSelf ? '&#128190;' : (isGroup ? '&#128101;' : (c.peer[0] || '?').toUpperCase())}</div>
-        <div class="chat-info">
-          <div class="chat-name">${escapeHtml(displayName)}</div>
-          <div class="chat-preview">${escapeHtml(c.lastMsg || 'No messages')}</div>
-        </div>
-        <div class="chat-time">${formatTime(c.lastTs)}</div>
-        ${!isSelf ? '<button type="button" class="chat-row-menu-btn btn-icon" title="Options">&#8942;</button>' : ''}
-      `;
-      const menuBtn = li.querySelector('.chat-row-menu-btn');
+      const avatar = document.createElement('div');
+      avatar.className = 'chat-avatar';
+      avatar.textContent = isSelf ? '\u{1F4E6}' : (isGroup ? '\u{1F465}' : (c.peer[0] || '?').toUpperCase());
+      const info = document.createElement('div');
+      info.className = 'chat-info';
+      const nameEl = document.createElement('div');
+      nameEl.className = 'chat-name';
+      nameEl.textContent = displayName;
+      const previewEl = document.createElement('div');
+      previewEl.className = 'chat-preview';
+      previewEl.textContent = c.lastMsg || 'No messages';
+      info.appendChild(nameEl);
+      info.appendChild(previewEl);
+      const timeEl = document.createElement('div');
+      timeEl.className = 'chat-time';
+      timeEl.textContent = formatTime(c.lastTs);
+      li.appendChild(avatar);
+      li.appendChild(info);
+      li.appendChild(timeEl);
       const rowPeer = c.peer;
-      li.onclick = (e) => {
-        if (e.target.closest('.chat-row-menu-btn')) return;
-        this.dispatchEvent(new CustomEvent('war-chat-select-peer', { detail: { peer: navParam }, bubbles: true }));
-      };
-      if (menuBtn) {
+      if (!isSelf) {
+        const menuBtn = document.createElement('button');
+        menuBtn.type = 'button';
+        menuBtn.className = 'chat-row-menu-btn btn-icon';
+        menuBtn.title = 'Options';
+        menuBtn.textContent = '\u22EE';
         menuBtn.onclick = (e) => {
           e.stopPropagation();
           e.preventDefault();
@@ -79,7 +89,12 @@ customElements.define('war-chat-chat-list', class WarChatChatList extends HTMLEl
             this.dispatchEvent(new CustomEvent('war-chat-chat-action', { detail: { peer: rowPeer, action }, bubbles: true }));
           });
         };
+        li.appendChild(menuBtn);
       }
+      li.onclick = (e) => {
+        if (e.target.closest('.chat-row-menu-btn')) return;
+        this.dispatchEvent(new CustomEvent('war-chat-select-peer', { detail: { peer: navParam }, bubbles: true }));
+      };
       this.appendChild(li);
     }
   }

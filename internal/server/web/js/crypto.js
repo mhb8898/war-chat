@@ -4,7 +4,15 @@ export function ensureCrypto() {
   if (typeof window === 'undefined' || !window.crypto || !window.crypto.subtle) {
     const msg = 'Web Crypto API is not available. Use HTTPS or open from localhost.';
     if (typeof document !== 'undefined' && document.body) {
-      document.body.innerHTML = '<div style="padding:2rem;text-align:center;font-family:sans-serif"><h2>Security Required</h2><p>' + msg + '</p></div>';
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'padding:2rem;text-align:center;font-family:sans-serif';
+      const h2 = document.createElement('h2');
+      h2.textContent = 'Security Required';
+      const p = document.createElement('p');
+      p.textContent = msg;
+      wrap.appendChild(h2);
+      wrap.appendChild(p);
+      document.body.replaceChildren(wrap);
     }
     throw new Error(msg);
   }

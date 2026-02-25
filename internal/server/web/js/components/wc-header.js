@@ -36,28 +36,39 @@ customElements.define('war-chat-header', class WarChatHeader extends HTMLElement
   }
 
   render() {
-    const title = this.getAttribute('title') || 'War Chat';
+    const titleText = this.getAttribute('title') || 'War Chat';
     const showBack = this.hasAttribute('show-back');
     const items = this.buildMenuItems();
-    let html = `<h1>${title}</h1><div class="header-actions" id="headerActions">`;
-    if (showBack) html += '<button class="btn-icon" data-action="back" title="Back">&#8592;</button>';
-    if (items.length > 0) {
-      html += '<button class="btn-icon btn-menu-toggle" id="headerMenuToggle" title="Menu">&#8942;</button>';
-    }
-    html += '</div>';
-    this.innerHTML = html;
-    const backBtn = this.querySelector('[data-action="back"]');
-    if (backBtn) {
+    this.replaceChildren();
+    const h1 = document.createElement('h1');
+    h1.textContent = titleText;
+    this.appendChild(h1);
+    const actions = document.createElement('div');
+    actions.className = 'header-actions';
+    actions.id = 'headerActions';
+    if (showBack) {
+      const backBtn = document.createElement('button');
+      backBtn.className = 'btn-icon';
+      backBtn.setAttribute('data-action', 'back');
+      backBtn.title = 'Back';
+      backBtn.textContent = '\u2190';
       backBtn.onclick = () => this.dispatchEvent(new CustomEvent('war-chat-header-action', { detail: { action: 'back' }, bubbles: true }));
+      actions.appendChild(backBtn);
     }
-    const menuBtn = this.querySelector('#headerMenuToggle');
-    if (menuBtn && items.length > 0) {
+    if (items.length > 0) {
+      const menuBtn = document.createElement('button');
+      menuBtn.className = 'btn-icon btn-menu-toggle';
+      menuBtn.id = 'headerMenuToggle';
+      menuBtn.title = 'Menu';
+      menuBtn.textContent = '\u22EE';
       menuBtn.onclick = (e) => {
         e.stopPropagation();
         showMenu(menuBtn, items, (action) => {
           this.dispatchEvent(new CustomEvent('war-chat-header-action', { detail: { action }, bubbles: true }));
         });
       };
+      actions.appendChild(menuBtn);
     }
+    this.appendChild(actions);
   }
 });

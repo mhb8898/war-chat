@@ -1,6 +1,6 @@
 // War Chat - single message bubble component
 
-import { formatMessage, escapeHtml } from '../utils.js';
+import { formatMessageAsFragment } from '../utils.js';
 import { showMenu } from './wc-menu.js';
 
 customElements.define('war-chat-message', class WarChatMessage extends HTMLElement {
@@ -70,9 +70,17 @@ customElements.define('war-chat-message', class WarChatMessage extends HTMLEleme
     const text = this.getAttribute('text') || '';
     const kind = this.getAttribute('kind') || 'note'; // sent | received | note
     this.className = 'msg ' + kind;
-    const isNote = kind === 'note';
-    this.innerHTML = isNote
-      ? formatMessage(text)
-      : `<span class="meta">${escapeHtml(from)}</span><br>${formatMessage(text)}`;
+    this.replaceChildren();
+    const bodyFragment = formatMessageAsFragment(text);
+    if (kind === 'note') {
+      this.appendChild(bodyFragment);
+    } else {
+      const meta = document.createElement('span');
+      meta.className = 'meta';
+      meta.textContent = from;
+      this.appendChild(meta);
+      this.appendChild(document.createElement('br'));
+      this.appendChild(bodyFragment);
+    }
   }
 });

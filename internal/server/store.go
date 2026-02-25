@@ -133,10 +133,11 @@ func (s *Store) CreateGroup(id, name string, members []string, createdBy string)
 	if !safePathComponent(id) {
 		return errors.New("invalid group id")
 	}
+	safeID := id
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	path := filepath.Join(s.groupsDir, id+".json")
+	path := filepath.Join(s.groupsDir, safeID+".json")
 	if _, err := os.Stat(path); err == nil {
 		return errors.New("group already exists")
 	}
@@ -160,8 +161,9 @@ func (s *Store) GetGroup(id string) (*Group, error) {
 	if !safePathComponent(id) {
 		return nil, errors.New("invalid group id")
 	}
+	safeID := id
 	s.mu.RLock()
-	path := filepath.Join(s.groupsDir, id+".json")
+	path := filepath.Join(s.groupsDir, safeID+".json")
 	s.mu.RUnlock()
 
 	data, err := os.ReadFile(path)
@@ -180,6 +182,10 @@ func (s *Store) GetGroup(id string) (*Group, error) {
 
 // UpdateGroupMembers updates the members list of a group.
 func (s *Store) UpdateGroupMembers(id string, members []string) error {
+	if !safePathComponent(id) {
+		return errors.New("invalid group id")
+	}
+	safeID := id
 	g, err := s.GetGroup(id)
 	if err != nil || g == nil {
 		return err
@@ -189,10 +195,10 @@ func (s *Store) UpdateGroupMembers(id string, members []string) error {
 
 	g.Members = members
 	if len(members) == 0 {
-		path := filepath.Join(s.groupsDir, id+".json")
+		path := filepath.Join(s.groupsDir, safeID+".json")
 		return os.Remove(path)
 	}
-	path := filepath.Join(s.groupsDir, id+".json")
+	path := filepath.Join(s.groupsDir, safeID+".json")
 	data, err := json.MarshalIndent(g, "", "  ")
 	if err != nil {
 		return err
@@ -242,9 +248,10 @@ func (s *Store) DeleteGroup(id string) error {
 	if !safePathComponent(id) {
 		return errors.New("invalid group id")
 	}
+	safeID := id
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	path := filepath.Join(s.groupsDir, id+".json")
+	path := filepath.Join(s.groupsDir, safeID+".json")
 	return os.Remove(path)
 }
 
@@ -261,8 +268,9 @@ func (s *Store) QueueOfflineWithMeta(recipient, msgID, from, payload, nonce stri
 	if !safePathComponent(recipient) || !safePathComponent(msgID) {
 		return errors.New("invalid recipient or message id")
 	}
+	safeRecipient, safeMsgID := recipient, msgID
 
-	dir := filepath.Join(s.offlineDir, recipient)
+	dir := filepath.Join(s.offlineDir, safeRecipient)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
@@ -282,7 +290,7 @@ func (s *Store) QueueOfflineWithMeta(recipient, msgID, from, payload, nonce stri
 		return err
 	}
 
-	path := filepath.Join(dir, msgID+".json")
+	path := filepath.Join(dir, safeMsgID+".json")
 	return os.WriteFile(path, data, 0600)
 }
 
@@ -290,8 +298,9 @@ func (s *Store) GetOffline(recipient string) ([]map[string]interface{}, error) {
 	if !safePathComponent(recipient) {
 		return nil, nil
 	}
+	safeRecipient := recipient
 	s.mu.RLock()
-	dir := filepath.Join(s.offlineDir, recipient)
+	dir := filepath.Join(s.offlineDir, safeRecipient)
 	s.mu.RUnlock()
 
 	entries, err := os.ReadDir(dir)
@@ -308,10 +317,11 @@ func (s *Store) GetOffline(recipient string) ([]map[string]interface{}, error) {
 			continue
 		}
 		base := e.Name()
-		if !safePathComponent(strings.TrimSuffix(base, ".json")) {
+		nameNoExt := strings.TrimSuffix(base, ".json")
+		if !safePathComponent(nameNoExt) {
 			continue
 		}
-		path := filepath.Join(dir, base)
+		path := filepath.Join(dir, nameNoExt+".json")
 		data, err := os.ReadFile(path)
 		if err != nil {
 			continue
@@ -332,12 +342,14 @@ func (s *Store) DeleteOffline(recipient string, ids []string) error {
 	if !safePathComponent(recipient) {
 		return errors.New("invalid recipient")
 	}
-	dir := filepath.Join(s.offlineDir, recipient)
+	safeRecipient := recipient
+	dir := filepath.Join(s.offlineDir, safeRecipient)
 	for _, id := range ids {
 		if !safePathComponent(id) {
 			continue
 		}
-		path := filepath.Join(dir, id+".json")
+		safeID := id
+		path := filepath.Join(dir, safeID+".json")
 		_ = os.Remove(path)
 	}
 	return nil
@@ -364,13 +376,13 @@ func (s *Store) ResetOffline() error {
 		return err
 	}
 	for _, e := range entries {
-		if !e.IsDir() {
+		if !e.IsDir() || !safePathComponent(e.Name()) {
 			continue
 		}
 		sub := filepath.Join(dir, e.Name())
 		subEntries, _ := os.ReadDir(sub)
 		for _, f := range subEntries {
-			if f.IsDir() {
+			if f.IsDir() || !safePathComponent(f.Name()) {
 				continue
 			}
 			_ = os.Remove(filepath.Join(sub, f.Name()))
@@ -394,6 +406,10 @@ func (s *Store) ResetGroups() error {
 	}
 	for _, e := range entries {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
+			continue
+		}
+		// Only remove paths under dir; reject names that could traverse
+		if !safePathComponent(e.Name()) {
 			continue
 		}
 		_ = os.Remove(filepath.Join(dir, e.Name()))

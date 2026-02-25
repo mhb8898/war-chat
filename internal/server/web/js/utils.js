@@ -22,6 +22,34 @@ export function formatMessage(text) {
   return result;
 }
 
+/**
+ * Build message body as DOM (no innerHTML). Use for user/attribute text so it's never interpreted as HTML.
+ * Supports ```code``` blocks and newlines.
+ */
+export function formatMessageAsFragment(text) {
+  const fragment = document.createDocumentFragment();
+  if (!text || typeof text !== 'string') return fragment;
+  const parts = text.split('```');
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    if (i % 2 === 1) {
+      const pre = document.createElement('pre');
+      pre.className = 'msg-code';
+      const code = document.createElement('code');
+      code.textContent = part;
+      pre.appendChild(code);
+      fragment.appendChild(pre);
+    } else {
+      const lines = part.split('\n');
+      lines.forEach((line, j) => {
+        fragment.appendChild(document.createTextNode(line));
+        if (j < lines.length - 1) fragment.appendChild(document.createElement('br'));
+      });
+    }
+  }
+  return fragment;
+}
+
 export function formatTime(ts) {
   const d = new Date(ts);
   const now = new Date();
