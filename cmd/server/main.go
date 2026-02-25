@@ -8,6 +8,7 @@ import (
 	"github.com/war-chat/war-chat/internal/server"
 )
 
+// Version is set at build time by the release GitHub Action; do not change it here.
 var Version = "dev"
 
 func main() {
