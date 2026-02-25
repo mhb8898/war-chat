@@ -7,6 +7,9 @@ const GROUP_NAME = 'E2E Test Group';
 
 async function registerUser(page, username) {
   await expect(page.locator('#view-setup')).toBeVisible();
+  // Expand 12-word recovery phrase section (collapsed by default on welcome page)
+  await page.locator('#btnToggleMnemonic').click();
+  await expect(page.locator('#setup-mnemonic')).not.toHaveClass(/hidden/);
   await page.locator('#btnGenerate').click();
   await page.waitForTimeout(300);
   await page.locator('#btnContinue').click();
@@ -23,6 +26,8 @@ test.describe('Group chat E2E', () => {
   test('app loads and registration works', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#view-setup')).toBeVisible();
+    await page.locator('#btnToggleMnemonic').click();
+    await expect(page.locator('#setup-mnemonic')).not.toHaveClass(/hidden/);
     await page.locator('#btnGenerate').click();
     await page.waitForTimeout(200);
     await page.locator('#btnContinue').click();
