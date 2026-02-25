@@ -13,9 +13,9 @@ import (
 var webFS embed.FS
 
 type Server struct {
-	store     *Store
-	hub       *Hub
-	version   string
+	store      *Store
+	hub        *Hub
+	version    string
 	adminToken string
 }
 
