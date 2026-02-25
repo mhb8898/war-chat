@@ -8,6 +8,7 @@ Minimal E2E-encrypted chat server. [فارسی (Persian) →](README.fa.md) HTTP
 - **Passkey or recovery phrase** — Sign in with passkey (WebAuthn) or 12-word mnemonic
 - **Encrypted local storage** — Messages in IndexedDB encrypted with key derived from your credentials
 - **User directory** — Browse and search registered users to start chats
+- **Group chat** — Create groups, invite users, accept or decline invites; group messages are E2E encrypted
 - **Shareable links** — Share `/u/username` so others can message you directly
 - **QR code** — Profile QR for easy sharing (bundled locally, no internet)
 - **Mobile-friendly** — Responsive layout, notifications
@@ -36,11 +37,12 @@ go run ./cmd/server
 2. **Register** — Choose a username and register
 3. **New chat** — Click "New chat" to browse users, search, and start a conversation
 4. **Share** — Copy your chat link (e.g. `http://localhost:8080/u/alice`) or share the QR code from Profile
-5. **Chat** — Messages are E2E encrypted; only you and the recipient can read them
+5. **Chat** — Messages are E2E encrypted; only you and the recipient can read them. Use **New group** to create group chats and invite others.
 
-## End-to-end tests (group chat)
+## Tests
 
-E2E tests use Playwright and cover: create group, invite user, accept/decline invite, send message in group.
+- **Unit tests** (Vitest): `npm test`
+- **E2E tests** (Playwright, group chat): create group, invite user, accept/decline invite, send message in group.
 
 ```bash
 # One-time: install Node deps and Playwright browser
