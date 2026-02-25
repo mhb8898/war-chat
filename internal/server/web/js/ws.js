@@ -12,7 +12,7 @@ import {
 } from './crypto.js';
 import * as api from './api.js';
 import * as groups from './groups.js';
-import { peerFromGroupId } from './config.js';
+import { peerFromGroupId } from './groups.js';
 
 let onMessageCallback = null;
 

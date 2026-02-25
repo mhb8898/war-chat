@@ -1,7 +1,7 @@
 // War Chat - chat list (conversations) component
 
 import { escapeHtml, formatTime } from '../utils.js';
-import { isGroupPeer, groupPeerId } from '../config.js';
+import { isGroupPeer, groupPeerId } from '../groups.js';
 
 customElements.define('war-chat-chat-list', class WarChatChatList extends HTMLElement {
   constructor() {

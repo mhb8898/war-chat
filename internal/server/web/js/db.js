@@ -9,8 +9,8 @@ import {
   STORE_PENDING_GROUP_INVITES,
   STORE_KEYPAIRS,
   STORE_PASSKEY_CREDS,
-  peerFromGroupId,
 } from './config.js';
+import { peerFromGroupId } from './groups.js';
 import {
   encryptMessageForStorage,
   decryptMessageFromStorage,

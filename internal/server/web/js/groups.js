@@ -1,7 +1,7 @@
 // War Chat - group logic (create, invite, add member, leave, accept/decline)
 
 import { state } from './state.js';
-import { isGroupPeer, groupPeerId, peerFromGroupId } from './config.js';
+import { GROUP_PEER_PREFIX } from './config.js';
 import * as db from './db.js';
 import {
   encrypt,
@@ -12,7 +12,17 @@ import {
 } from './crypto.js';
 import * as api from './api.js';
 
-export { isGroupPeer, groupPeerId, peerFromGroupId };
+export function isGroupPeer(peer) {
+  return typeof peer === 'string' && peer.startsWith(GROUP_PEER_PREFIX);
+}
+
+export function groupPeerId(peer) {
+  return isGroupPeer(peer) ? peer.slice(GROUP_PEER_PREFIX.length) : null;
+}
+
+export function peerFromGroupId(groupId) {
+  return GROUP_PEER_PREFIX + groupId;
+}
 
 export async function generateSenderKeyRaw() {
   const raw = crypto.getRandomValues(new Uint8Array(32));
