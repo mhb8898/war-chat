@@ -61,10 +61,6 @@ test.describe('Group chat E2E', () => {
       await expect(pageA.locator('#newGroupModal')).not.toHaveClass(/visible/);
 
       await expect(pageA.locator('#messageInput')).toBeVisible({ timeout: 5000 });
-      await pageA.waitForTimeout(500);
-
-      await pageA.locator('#messageInput').fill('Hello from alice');
-      await pageA.locator('#btnSend').click();
 
       // Wait for Bob to receive the group invite: section is in DOM but hidden until invites exist
       const invitesSection = pageB.locator('#group-invites-section');
@@ -80,6 +76,11 @@ test.describe('Group chat E2E', () => {
 
       await expect(pageB.locator('#messageInput')).toBeVisible({ timeout: 5000 });
       await expect(pageB.locator('.messages-inner')).toContainText('You joined the group');
+
+      // Send message after Bob has joined so his client can decrypt and display it
+      await pageA.locator('#messageInput').fill('Hello from alice');
+      await pageA.locator('#btnSend').click();
+
       await expect(pageB.locator('.messages-inner')).toContainText('Hello from alice');
     } finally {
       await contextA.close();
