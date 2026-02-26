@@ -19,7 +19,8 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
+          # v1.64.x rejects v2 config; v2.x supports version: "2" in .golangci.yml
+          version: v2.6
 
   test:
     runs-on: ubuntu-latest
