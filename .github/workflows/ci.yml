@@ -16,10 +16,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v6
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          # v1.64.x rejects v2 config; v2.x supports version: "2" in .golangci.yml
+          go-version: "1.24"
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v7
+        with:
           version: v2.6
 
   test:
