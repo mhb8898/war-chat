@@ -25,6 +25,8 @@ let decoderNeedsKeyframe = true;
 let lastKeyframeRequestTs = 0;
 /** Codec the remote peer is using (received via control); decoder must use this, not selectedCodec. */
 let remoteCodec = null;
+/** First keyframe received before codec; decode when codec arrives. */
+let pendingKeyframe = null;
 
 // --- Audio (Opus) ---
 const AUDIO_SAMPLE_RATE = 48000;
@@ -103,7 +105,12 @@ function decodeIncoming(data, type) {
   decodeTimestamp += 1000;
 
   if (!decoderConfigured) {
-    if (!remoteCodec) return;
+    if (!remoteCodec) {
+      if (type === 'key' && !pendingKeyframe) {
+        pendingKeyframe = { data: new Uint8Array(buf), timestamp: decodeTimestamp };
+      }
+      return;
+    }
     const codecForDecode = remoteCodec;
     const baseConfig = {
       codec: codecForDecode,
@@ -277,6 +284,14 @@ function handleFrame(msg) {
         try { videoDecoder.close(); } catch (_) {}
         videoDecoder = null;
         decoderConfigured = false;
+      }
+      // If we had buffered the first keyframe (video arrived before codec), decode it now.
+      if (pendingKeyframe) {
+        decodeTimestamp = pendingKeyframe.timestamp - 1000;
+        decodeIncoming(pendingKeyframe.data, 'key');
+        pendingKeyframe = null;
+      } else if (peerUsername) {
+        hrt.sendFrame(peerUsername, 'control', { t: 'keyframe' });
       }
     }
   }
@@ -530,6 +545,11 @@ export function startLocalMedia(peer) {
     peerUsername = joinedPeer;
     maybeStartEncoder();
     maybeStartAudioEncoder();
+    // If we already had an encoder (we were first in the room), the joiner never got our codec
+    // (it was sent before they joined and dropped by the server). Send it now so they can decode our video.
+    if (videoEncoder && selectedCodec && joinedPeer) {
+      hrt.sendFrame(joinedPeer, 'control', { t: 'codec', codec: selectedCodec });
+    }
   });
   hrt.setOnPeerLeft(() => {
     peerUsername = null;
@@ -644,6 +664,7 @@ export function stopLocalMedia() {
   decoderNeedsKeyframe = true;
   lastKeyframeRequestTs = 0;
   remoteCodec = null;
+  pendingKeyframe = null;
   peerUsername = null;
   decodeTimestamp = 0;
 
