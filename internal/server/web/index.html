@@ -87,6 +87,41 @@
       #chat-pane #messages { padding-bottom: 5rem; }
       /* Hide footer in chat view on mobile (like Telegram) */
       main:has(.view-main.active) + .app-footer { display: none; }
+      /* Video call: fixed control bar so it never goes behind video on small screens */
+      .view-video {
+        overflow-y: auto;
+        padding-bottom: calc(4rem + env(safe-area-inset-bottom, 0px));
+      }
+      .view-video .video-grid {
+        flex: 0 1 auto;
+        max-height: 50vh;
+        min-height: 100px;
+        position: relative;
+        z-index: 0;
+      }
+      .view-video .video-box {
+        min-width: 100px;
+        min-height: 80px;
+      }
+      .view-video .video-controls {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        z-index: 20;
+        display: flex;
+        gap: 0.5rem;
+        justify-content: center;
+        padding: 0.75rem 1rem;
+        padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+        background: #1a1a2e;
+        border-top: 1px solid #0f3460;
+        flex-shrink: 0;
+      }
+      .view-video .video-controls button {
+        padding: 0.5rem 0.75rem;
+        font-size: 0.875rem;
+      }
     }
     .header {
       display: flex;

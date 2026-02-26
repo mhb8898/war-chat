@@ -6,6 +6,12 @@ import * as hrt from './hrt.js';
 const VIDEO_WIDTH = 640;
 const VIDEO_HEIGHT = 360;
 const VIDEO_FPS = 30;
+/** Actual encode dimensions (from device); may differ from VIDEO_WIDTH/HEIGHT for native aspect ratio. */
+let encodeWidth = VIDEO_WIDTH;
+let encodeHeight = VIDEO_HEIGHT;
+/** Remote peer's video dimensions (from codec message); used for decoder and display. */
+let remoteWidth = VIDEO_WIDTH;
+let remoteHeight = VIDEO_HEIGHT;
 const KEYFRAME_INTERVAL = 30; // keyframe every 1s at 30fps
 const VIDEO_BITRATE = 400_000;
 
@@ -66,16 +72,24 @@ function base64ToArrayBuffer(b64) {
 function getCanvasContext() {
   const canvas = document.getElementById('videoRemoteCanvas');
   if (!canvas) return null;
-  canvas.width = VIDEO_WIDTH;
-  canvas.height = VIDEO_HEIGHT;
   return canvas.getContext('2d');
 }
 
 function drawFrame(frame) {
-  const ctx = getCanvasContext();
-  if (!ctx || !frame) return;
+  const canvas = document.getElementById('videoRemoteCanvas');
+  const ctx = canvas ? canvas.getContext('2d') : null;
+  if (!ctx || !frame) {
+    if (frame) frame.close();
+    return;
+  }
+  const w = frame.codedWidth;
+  const h = frame.codedHeight;
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w;
+    canvas.height = h;
+  }
   try {
-    ctx.drawImage(frame, 0, 0, VIDEO_WIDTH, VIDEO_HEIGHT);
+    ctx.drawImage(frame, 0, 0, w, h, 0, 0, w, h);
   } finally {
     frame.close();
   }
@@ -114,8 +128,8 @@ function decodeIncoming(data, type) {
     const codecForDecode = remoteCodec;
     const baseConfig = {
       codec: codecForDecode,
-      codedWidth: VIDEO_WIDTH,
-      codedHeight: VIDEO_HEIGHT,
+      codedWidth: remoteWidth,
+      codedHeight: remoteHeight,
     };
     try {
       videoDecoder.configure(baseConfig);
@@ -280,6 +294,8 @@ function handleFrame(msg) {
     if (msg.payload.t === 'keyframe') requestKeyframe = true;
     if (msg.payload.t === 'codec' && msg.payload.codec) {
       remoteCodec = msg.payload.codec;
+      remoteWidth = Math.max(1, Number(msg.payload.width) || VIDEO_WIDTH);
+      remoteHeight = Math.max(1, Number(msg.payload.height) || VIDEO_HEIGHT);
       if (decoderConfigured && videoDecoder) {
         try { videoDecoder.close(); } catch (_) {}
         videoDecoder = null;
@@ -478,13 +494,18 @@ export function startLocalMedia(peer) {
   hrt.setOnFrame(handleFrame);
   async function maybeStartEncoder() {
     if (!peerUsername || !localStream || videoEncoder) return;
+    const w = localPreview.videoWidth || 0;
+    const h = localPreview.videoHeight || 0;
+    if (w < 1 || h < 1) return; // wait for video dimensions (loadedmetadata will call again)
     if (typeof VideoEncoder === 'undefined') {
       updateStatus('Connected (video encode not supported in this browser)');
       return;
     }
+    encodeWidth = w;
+    encodeHeight = h;
     const config = {
-      width: VIDEO_WIDTH,
-      height: VIDEO_HEIGHT,
+      width: encodeWidth,
+      height: encodeHeight,
       bitrate: VIDEO_BITRATE,
       framerate: VIDEO_FPS,
       codec: null, // set per tryCodec
@@ -516,8 +537,8 @@ export function startLocalMedia(peer) {
         error: (e) => console.warn('VideoEncoder error:', e),
       });
       const encoderConfig = {
-        width: VIDEO_WIDTH,
-        height: VIDEO_HEIGHT,
+        width: encodeWidth,
+        height: encodeHeight,
         bitrate: VIDEO_BITRATE,
         framerate: VIDEO_FPS,
         codec: selectedCodec,
@@ -533,7 +554,7 @@ export function startLocalMedia(peer) {
         if (encoderConfig.avc) delete encoderConfig.avc;
         videoEncoder.configure(encoderConfig);
       }
-      hrt.sendFrame(peerUsername, 'control', { t: 'codec', codec: selectedCodec });
+      hrt.sendFrame(peerUsername, 'control', { t: 'codec', codec: selectedCodec, width: encodeWidth, height: encodeHeight });
       startEncodeLoopWhenReady(localPreview);
       updateStatus('Connected');
     } catch (e) {
@@ -548,7 +569,7 @@ export function startLocalMedia(peer) {
     // If we already had an encoder (we were first in the room), the joiner never got our codec
     // (it was sent before they joined and dropped by the server). Send it now so they can decode our video.
     if (videoEncoder && selectedCodec && joinedPeer) {
-      hrt.sendFrame(joinedPeer, 'control', { t: 'codec', codec: selectedCodec });
+      hrt.sendFrame(joinedPeer, 'control', { t: 'codec', codec: selectedCodec, width: encodeWidth, height: encodeHeight });
     }
   });
   hrt.setOnPeerLeft(() => {
@@ -612,13 +633,15 @@ export function startLocalMedia(peer) {
     };
   }
 
-  navigator.mediaDevices.getUserMedia({ video: { width: VIDEO_WIDTH, height: VIDEO_HEIGHT, frameRate: { max: VIDEO_FPS } }, audio: true })
+  // Use device-native aspect ratio: avoid fixed width/height so the camera is not stretched
+  navigator.mediaDevices.getUserMedia({ video: { frameRate: { max: VIDEO_FPS } }, audio: true })
     .then((stream) => {
       localStream = stream;
       localPreview.srcObject = stream;
       startAudioCapture(stream);
       updateStatus('Waiting for peer…');
       maybeStartEncoder();
+      localPreview.addEventListener('loadedmetadata', () => maybeStartEncoder(), { once: true });
     })
     .catch((err) => {
       updateStatus('Camera/mic error: ' + (err?.message || 'Permission denied'));
@@ -664,6 +687,8 @@ export function stopLocalMedia() {
   decoderNeedsKeyframe = true;
   lastKeyframeRequestTs = 0;
   remoteCodec = null;
+  remoteWidth = VIDEO_WIDTH;
+  remoteHeight = VIDEO_HEIGHT;
   pendingKeyframe = null;
   peerUsername = null;
   decodeTimestamp = 0;
@@ -671,6 +696,6 @@ export function stopLocalMedia() {
   const canvas = document.getElementById('videoRemoteCanvas');
   if (canvas) {
     const ctx = canvas.getContext('2d');
-    if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (ctx && canvas.width && canvas.height) ctx.clearRect(0, 0, canvas.width, canvas.height);
   }
 }
