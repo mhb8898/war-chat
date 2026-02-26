@@ -14,6 +14,8 @@ export function showMenu(anchor, items, onSelect) {
   const menu = document.createElement('div');
   menu.id = 'wc-menu-dropdown';
   menu.className = 'wc-menu-dropdown';
+  menu.style.position = 'fixed';
+  menu.style.zIndex = '10000';
   const list = document.createElement('div');
   list.className = 'wc-menu-list';
   items.forEach(({ label, action }) => {

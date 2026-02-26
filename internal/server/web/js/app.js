@@ -27,6 +27,11 @@ modals.setModalsCallbacks({
 export { navigate, getRoute };
 export { showNewChatModal, showNewGroupModal, showAddMemberModal, createGroupFromModal, addMemberToGroupFromModal } from './modals.js';
 
+/** Navigate to video call view with peer (1:1). */
+export function startVideoChat(peer) {
+  navigate('video', peer);
+}
+
 export function getSelectedPeerFromRoute() {
   const { view, param } = getRoute();
   if (view !== 'chat' || !param) return null;
@@ -173,6 +178,16 @@ export function showView(name, param) {
       headerEl.setAttribute('show-back', '');
       headerEl.setAttribute('show-logout', '');
     }
+  } else if (name === 'video') {
+    if (headerEl) {
+      headerEl.setAttribute('title', param ? `Video call with ${param}` : 'Video call');
+      headerEl.setAttribute('show-back', '');
+      headerEl.removeAttribute('show-add-member');
+      headerEl.removeAttribute('show-leave-group');
+      headerEl.removeAttribute('show-new-chat');
+      headerEl.removeAttribute('show-profile');
+      headerEl.setAttribute('show-logout', '');
+    }
   } else {
     if (headerEl) {
       headerEl.removeAttribute('show-back');
@@ -283,6 +298,23 @@ export function render() {
     case 'profile':
       showView('profile');
       profile.renderProfile();
+      break;
+    case 'video':
+      if (param) {
+        showView('video', param);
+        Promise.all([import('./hrt.js'), import('./hrt-media.js')])
+          .then(([hrtMod, mediaMod]) => {
+            hrtMod.startVideoCall(param);
+            mediaMod.startLocalMedia(param);
+          })
+          .catch((e) => {
+            console.error('Video call start failed:', e);
+            const el = document.getElementById('videoStatus');
+            if (el) el.textContent = 'Failed: ' + (e?.message || 'Unknown error');
+          });
+      } else {
+        navigate('chats');
+      }
       break;
     default:
       showView('main');

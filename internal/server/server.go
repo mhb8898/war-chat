@@ -15,6 +15,7 @@ var webFS embed.FS
 type Server struct {
 	store      *Store
 	hub        *Hub
+	hrtHub     *HRTHub
 	version    string
 	adminToken string
 }
@@ -31,13 +32,15 @@ func New(dataDir, version string) (*Server, error) {
 	hub := NewHub(store)
 	go hub.Run()
 
+	hrtHub := NewHRTHub(store)
+
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
 		return nil, err
 	}
 	adminToken := hex.EncodeToString(b)
 
-	s := &Server{store: store, hub: hub, version: version, adminToken: adminToken}
+	s := &Server{store: store, hub: hub, hrtHub: hrtHub, version: version, adminToken: adminToken}
 	s.setupRoutes()
 	return s, nil
 }

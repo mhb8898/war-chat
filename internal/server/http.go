@@ -35,6 +35,7 @@ func (s *Server) setupRoutes() {
 	http.HandleFunc("/users", s.handleUsers)
 	http.HandleFunc("/keys/", s.handleKeys)
 	http.HandleFunc("/ws", s.handleWebSocket)
+	http.HandleFunc("/hrt/v1", s.handleHRT)
 	http.HandleFunc("/u/", s.handleShareableLink)
 	http.HandleFunc("/admin/", s.handleAdmin)
 	http.Handle("/", s.handleStatic())
@@ -151,6 +152,14 @@ func (s *Server) handleKeys(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	s.hub.ServeWS(w, r, s.store)
+}
+
+func (s *Server) handleHRT(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	s.hrtHub.ServeWS(w, r)
 }
 
 func (s *Server) handleShareableLink(w http.ResponseWriter, r *http.Request) {

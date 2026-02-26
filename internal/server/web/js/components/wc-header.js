@@ -29,7 +29,10 @@ customElements.define('war-chat-header', class WarChatHeader extends HTMLElement
     }
     if (showAddMember) items.push({ label: 'Add member', action: 'add-member' });
     if (showLeaveGroup) items.push({ label: 'Leave group', action: 'leave-group' });
-    if (showBack) items.push({ label: 'Delete chat', action: 'delete-chat' });
+    if (showBack) {
+      items.push({ label: 'Video chat', action: 'video-chat' });
+      items.push({ label: 'Delete chat', action: 'delete-chat' });
+    }
     if (showProfile) items.push({ label: 'Profile', action: 'profile' });
     if (showLogout) items.push({ label: 'Log out', action: 'logout' });
     return items;
