@@ -1,11 +1,12 @@
-// War Chat - HRT media: getUserMedia, WebCodecs encode/decode, render to canvas
+// War Chat - HRT media: getUserMedia, WebCodecs encode/decode, render to canvas.
+// Low latency: 30fps, realtime encoder, H.264 with Annex B (no description needed).
 
 import * as hrt from './hrt.js';
 
 const VIDEO_WIDTH = 640;
 const VIDEO_HEIGHT = 360;
-const VIDEO_FPS = 15;
-const KEYFRAME_INTERVAL = 30; // every 2s at 15fps
+const VIDEO_FPS = 30;
+const KEYFRAME_INTERVAL = 30; // keyframe every 1s at 30fps
 const VIDEO_BITRATE = 400_000;
 
 let localStream = null;
@@ -22,6 +23,8 @@ let selectedCodec = 'vp8';
 /** True until we've successfully decoded a key frame (decoder requires key after configure). */
 let decoderNeedsKeyframe = true;
 let lastKeyframeRequestTs = 0;
+/** Codec the remote peer is using (received via control); decoder must use this, not selectedCodec. */
+let remoteCodec = null;
 
 function arrayBufferToBase64(buf) {
   const bytes = new Uint8Array(buf);
@@ -69,6 +72,8 @@ function setupDecoder() {
     },
     error: (e) => {
       console.warn('VideoDecoder error:', e);
+      videoDecoder = null;
+      decoderConfigured = false;
     },
   });
 }
@@ -81,13 +86,29 @@ function decodeIncoming(data, type) {
   decodeTimestamp += 1000;
 
   if (!decoderConfigured) {
-    videoDecoder.configure({
-      codec: selectedCodec,
+    if (!remoteCodec) return;
+    const codecForDecode = remoteCodec;
+    const baseConfig = {
+      codec: codecForDecode,
       codedWidth: VIDEO_WIDTH,
       codedHeight: VIDEO_HEIGHT,
-    });
-    decoderConfigured = true;
-    decoderNeedsKeyframe = true;
+    };
+    try {
+      videoDecoder.configure(baseConfig);
+      decoderConfigured = true;
+      decoderNeedsKeyframe = true;
+    } catch (err) {
+      console.warn('VideoDecoder configure failed:', err);
+      videoDecoder = null;
+      decoderConfigured = false;
+      return;
+    }
+  }
+
+  if (videoDecoder && videoDecoder.state === 'closed') {
+    videoDecoder = null;
+    decoderConfigured = false;
+    return;
   }
 
   if (decoderNeedsKeyframe && type !== 'key') {
@@ -113,7 +134,10 @@ function decodeIncoming(data, type) {
     tryDecode(chunkType);
     if (chunkType === 'key') decoderNeedsKeyframe = false;
   } catch (e) {
-    if (e?.message?.includes('key frame is required')) decoderNeedsKeyframe = true;
+    const needKey = e?.message?.includes('key frame is required') ||
+      e?.message?.includes("wasn't a key frame") ||
+      e?.message?.includes('marked as type');
+    if (needKey) decoderNeedsKeyframe = true;
     if (type === 'key') {
       const now = performance.now();
       if (peerUsername && now - lastKeyframeRequestTs > 500) {
@@ -129,8 +153,16 @@ function handleFrame(msg) {
   if (msg.stream === 'video' && msg.payload != null) {
     decodeIncoming(msg.payload, msg.isKeyframe ? 'key' : 'delta');
   }
-  if (msg.stream === 'control' && msg.payload && typeof msg.payload === 'object' && msg.payload.t === 'keyframe') {
-    requestKeyframe = true;
+  if (msg.stream === 'control' && msg.payload && typeof msg.payload === 'object') {
+    if (msg.payload.t === 'keyframe') requestKeyframe = true;
+    if (msg.payload.t === 'codec' && msg.payload.codec) {
+      remoteCodec = msg.payload.codec;
+      if (decoderConfigured && videoDecoder) {
+        try { videoDecoder.close(); } catch (_) {}
+        videoDecoder = null;
+        decoderConfigured = false;
+      }
+    }
   }
 }
 
@@ -154,16 +186,15 @@ function encodeAndSend(videoEl) {
 }
 
 function startEncodeLoop(videoEl) {
-  function loop() {
+  const intervalMs = Math.round(1000 / VIDEO_FPS);
+  rafId = setInterval(() => {
     encodeAndSend(videoEl);
-    rafId = requestAnimationFrame(loop);
-  }
-  rafId = requestAnimationFrame(loop);
+  }, intervalMs);
 }
 
 function stopEncodeLoop() {
   if (rafId != null) {
-    cancelAnimationFrame(rafId);
+    clearInterval(rafId);
     rafId = null;
   }
   encodeFrameCount = 0;
@@ -197,15 +228,23 @@ export function startLocalMedia(peer) {
       updateStatus('Connected (video encode not supported in this browser)');
       return;
     }
-    const config = { width: VIDEO_WIDTH, height: VIDEO_HEIGHT, bitrate: VIDEO_BITRATE, framerate: VIDEO_FPS };
+    const config = {
+      width: VIDEO_WIDTH,
+      height: VIDEO_HEIGHT,
+      bitrate: VIDEO_BITRATE,
+      framerate: VIDEO_FPS,
+      codec: null, // set per tryCodec
+    };
     const tryCodec = async (codec) => {
-      const supported = await VideoEncoder.isConfigSupported({ ...config, codec });
+      const cfg = { ...config, codec };
+      const supported = await VideoEncoder.isConfigSupported(cfg);
       if (supported?.supported) return codec;
       return null;
     };
-    selectedCodec = (await tryCodec('vp8')) || (await tryCodec('avc1.42E01E')) || null;
+    // Prefer H.264 on Mac (often HW-accelerated); fallback to VP8
+    selectedCodec = (await tryCodec('avc1.42E01E')) || (await tryCodec('vp8')) || null;
     if (!selectedCodec) {
-      updateStatus('No supported video codec (VP8/H.264 required)');
+      updateStatus('No supported video codec (H.264/VP8 required)');
       return;
     }
     try {
@@ -223,7 +262,25 @@ export function startLocalMedia(peer) {
         },
         error: (e) => console.warn('VideoEncoder error:', e),
       });
-      videoEncoder.configure({ ...config, codec: selectedCodec });
+      const encoderConfig = {
+        width: VIDEO_WIDTH,
+        height: VIDEO_HEIGHT,
+        bitrate: VIDEO_BITRATE,
+        framerate: VIDEO_FPS,
+        codec: selectedCodec,
+        latencyMode: 'realtime', // minimizes encode latency (no B-frames, no lookahead)
+      };
+      if (selectedCodec.startsWith('avc1.') || selectedCodec.startsWith('avc3.')) {
+        encoderConfig.avc = { format: 'annexb' };
+      }
+      try {
+        videoEncoder.configure(encoderConfig);
+      } catch (_) {
+        delete encoderConfig.latencyMode;
+        if (encoderConfig.avc) delete encoderConfig.avc;
+        videoEncoder.configure(encoderConfig);
+      }
+      hrt.sendFrame(peerUsername, 'control', { t: 'codec', codec: selectedCodec });
       startEncodeLoop(localPreview);
       updateStatus('Connected');
     } catch (e) {
@@ -237,6 +294,7 @@ export function startLocalMedia(peer) {
   });
   hrt.setOnPeerLeft(() => {
     peerUsername = null;
+    remoteCodec = null;
     stopEncodeLoop();
     if (videoEncoder) {
       try { videoEncoder.close(); } catch (_) {}
@@ -302,6 +360,7 @@ export function stopLocalMedia() {
   decoderConfigured = false;
   decoderNeedsKeyframe = true;
   lastKeyframeRequestTs = 0;
+  remoteCodec = null;
   peerUsername = null;
   decodeTimestamp = 0;
 
