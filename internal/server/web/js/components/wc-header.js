@@ -4,7 +4,7 @@ import { showMenu } from './wc-menu.js';
 
 customElements.define('war-chat-header', class WarChatHeader extends HTMLElement {
   static get observedAttributes() {
-    return ['title', 'show-back', 'show-add-member', 'show-leave-group', 'show-new-chat', 'show-profile', 'show-logout'];
+    return ['title', 'show-back', 'show-video-chat', 'show-add-member', 'show-leave-group', 'show-new-chat', 'show-profile', 'show-logout'];
   }
 
   connectedCallback() {
@@ -17,6 +17,7 @@ customElements.define('war-chat-header', class WarChatHeader extends HTMLElement
 
   buildMenuItems() {
     const showBack = this.hasAttribute('show-back');
+    const showVideoChat = this.hasAttribute('show-video-chat');
     const showAddMember = this.hasAttribute('show-add-member');
     const showLeaveGroup = this.hasAttribute('show-leave-group');
     const showNewChat = this.hasAttribute('show-new-chat');
@@ -30,8 +31,10 @@ customElements.define('war-chat-header', class WarChatHeader extends HTMLElement
     if (showAddMember) items.push({ label: 'Add member', action: 'add-member' });
     if (showLeaveGroup) items.push({ label: 'Leave group', action: 'leave-group' });
     if (showBack) {
-      items.push({ label: 'Video chat', action: 'video-chat' });
-      items.push({ label: 'Delete chat', action: 'delete-chat' });
+      if (showVideoChat) {
+        items.push({ label: 'Video chat', action: 'video-chat' });
+        items.push({ label: 'Delete chat', action: 'delete-chat' });
+      }
     }
     if (showProfile) items.push({ label: 'Profile', action: 'profile' });
     if (showLogout) items.push({ label: 'Log out', action: 'logout' });

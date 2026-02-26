@@ -89,7 +89,13 @@ async function init() {
     else if (action === 'new-chat') showNewChatModal();
     else if (action === 'new-group') showNewGroupModal();
     else if (action === 'profile') navigate('profile');
-    else if (action === 'logout') doLogout();
+    else if (action === 'logout') {
+      if (getRoute().view === 'video') {
+        import('./hrt.js').then((m) => { m.endVideoCall(); doLogout(); });
+      } else {
+        doLogout();
+      }
+    }
     else if (action === 'delete-chat') {
       const param = getSelectedPeerFromRoute();
       if (!param) return;

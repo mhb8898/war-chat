@@ -181,7 +181,7 @@ function pushAudioSamples(samples) {
     const frame = audioInputBuffer.slice(0, need);
     audioInputBuffer.copyWithin(0, need, audioInputBufferLen);
     audioInputBufferLen -= need;
-    const timestampUs = audioEncodeTimestamp * 1000;
+    const timestampUs = audioEncodeTimestamp;
     audioEncodeTimestamp += (need / AUDIO_SAMPLE_RATE) * 1e6;
     if (typeof AudioData !== 'undefined') {
       try {
@@ -438,6 +438,7 @@ function stopEncodeLoop() {
  * Call when video view is shown and HRT has joined. Registers with hrt for frames and hangup.
  */
 export function startLocalMedia(peer) {
+  stopLocalMedia();
   peerUsername = peer;
 
   const statusEl = document.getElementById('videoStatus');

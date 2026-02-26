@@ -89,6 +89,7 @@ func (c *hrtClient) readPump() {
 		if err != nil {
 			break
 		}
+		_ = c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 
 		if messageType == websocket.BinaryMessage {
 			if c.username == "" {
@@ -221,7 +222,6 @@ func (h *HRTHub) removeClient(c *hrtClient) {
 		if len(room) == 0 {
 			delete(h.rooms, c.roomId)
 		} else {
-			close(c.send)
 			peerLeft := mustMarshal(map[string]interface{}{
 				"type":     "peer_left",
 				"username": c.username,
@@ -236,6 +236,7 @@ func (h *HRTHub) removeClient(c *hrtClient) {
 		}
 	}
 	h.mu.Unlock()
+	close(c.send)
 }
 
 func (h *HRTHub) sendToPeer(roomId, username string, data []byte, binary bool) {

@@ -154,6 +154,7 @@ export function showView(name, param) {
     if (headerEl) {
       headerEl.setAttribute('title', headerTitle);
       headerEl.toggleAttribute('show-back', !!param);
+      headerEl.toggleAttribute('show-video-chat', !!(param && !String(param).startsWith('group/')));
       headerEl.toggleAttribute('show-add-member', !!(param && groups.isGroupPeer(param)));
       headerEl.toggleAttribute('show-leave-group', !!(param && groups.isGroupPeer(param)));
       const isMobile = typeof window !== 'undefined' && window.matchMedia('(max-width: 768px)').matches;
@@ -171,6 +172,7 @@ export function showView(name, param) {
     if (headerEl) {
       headerEl.setAttribute('title', 'Profile');
       headerEl.removeAttribute('show-back');
+      headerEl.removeAttribute('show-video-chat');
       headerEl.removeAttribute('show-add-member');
       headerEl.removeAttribute('show-leave-group');
       headerEl.removeAttribute('show-new-chat');
@@ -182,6 +184,7 @@ export function showView(name, param) {
     if (headerEl) {
       headerEl.setAttribute('title', param ? `Video call with ${param}` : 'Video call');
       headerEl.setAttribute('show-back', '');
+      headerEl.removeAttribute('show-video-chat');
       headerEl.removeAttribute('show-add-member');
       headerEl.removeAttribute('show-leave-group');
       headerEl.removeAttribute('show-new-chat');
@@ -191,6 +194,7 @@ export function showView(name, param) {
   } else {
     if (headerEl) {
       headerEl.removeAttribute('show-back');
+      headerEl.removeAttribute('show-video-chat');
       headerEl.removeAttribute('show-add-member');
       headerEl.removeAttribute('show-leave-group');
       headerEl.removeAttribute('show-new-chat');
@@ -255,8 +259,14 @@ function doLogout() {
 
 export { doLogout };
 
+let _prevRenderView = null;
+
 export function render() {
   const { view, param } = getRoute();
+  if (_prevRenderView === 'video' && view !== 'video') {
+    import('./hrt.js').then((m) => m.endVideoCall()).catch(() => {});
+  }
+  _prevRenderView = view;
   document.querySelectorAll('.view').forEach((v) => v.classList.remove('active'));
 
   if (!auth.isLoggedIn() && view !== 'setup') {

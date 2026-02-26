@@ -58,12 +58,14 @@ function clearReconnectTimer() {
     clearTimeout(reconnectTimeoutId);
     reconnectTimeoutId = null;
   }
-  reconnectBackoffMs = 1000;
 }
 
 function scheduleReconnect() {
   if (userEndedCall || !currentPeer) return;
-  clearReconnectTimer();
+  if (reconnectTimeoutId != null) {
+    clearTimeout(reconnectTimeoutId);
+    reconnectTimeoutId = null;
+  }
   status('Connection lost. Reconnecting…');
   const delay = reconnectBackoffMs;
   reconnectBackoffMs = Math.min(reconnectBackoffMs * 2, RECONNECT_BACKOFF_MAX_MS);
@@ -89,14 +91,16 @@ function connect() {
 
   status(reconnectTimeoutId == null ? 'Connecting…' : 'Reconnecting…');
   hrtWs = new WebSocket(`${proto}//${host}/hrt/v1`);
+  hrtWs.binaryType = 'arraybuffer';
 
   hrtWs.onopen = () => {
+    reconnectBackoffMs = 1000;
+    clearReconnectTimer();
     hrtWs.send(JSON.stringify({
       type: 'join',
       roomId,
       username: state.currentUsername,
     }));
-    clearReconnectTimer();
     status('Waiting for peer…');
   };
 
