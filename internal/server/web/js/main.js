@@ -8,7 +8,7 @@ import { state } from './state.js';
 import { API_BASE } from './config.js';
 import * as auth from './auth.js';
 import * as api from './api.js';
-import { navigate, render, showNewChatModal, showNewGroupModal, createGroupFromModal, showAddMemberModal, addMemberToGroupFromModal, sendMessageFromInput, leaveGroupAndNavigate, doLogout, deleteChatWithPeer, deleteMessageInChat, renderGroupInvites, renderChatList, getSelectedPeerFromRoute } from './app.js';
+import { navigate, render, showNewChatModal, showNewGroupModal, createGroupFromModal, showAddMemberModal, addMemberToGroupFromModal, sendMessageFromInput, leaveGroupAndNavigate, doLogout, deleteChatWithPeer, deleteMessageInChat, renderGroupInvites, renderChatList, getSelectedPeerFromRoute, startVideoChat, getRoute } from './app.js';
 import * as groups from './groups.js';
 import { initSetup, setSetupCallbacks } from './setup.js';
 import { encryptMessageForStorage } from './crypto-storage.js';
@@ -69,7 +69,21 @@ async function init() {
   // Header actions (war-chat-header component)
   document.addEventListener('war-chat-header-action', (e) => {
     const action = e.detail?.action;
-    if (action === 'back') navigate('chats');
+    if (action === 'back') {
+      if (getRoute().view === 'video') {
+        import('./hrt.js').then((m) => m.endVideoCall());
+      } else {
+        navigate('chats');
+      }
+    } else if (action === 'video-chat') {
+      const peer = getSelectedPeerFromRoute();
+      if (!peer) return;
+      if (groups.isGroupPeer(peer)) {
+        alert('Video chat is only available for 1:1 chats.');
+        return;
+      }
+      startVideoChat(peer);
+    }
     else if (action === 'add-member') showAddMemberModal();
     else if (action === 'leave-group') leaveGroupAndNavigate();
     else if (action === 'new-chat') showNewChatModal();
@@ -90,12 +104,20 @@ async function init() {
     if (e.detail?.peer) navigate('chat', e.detail.peer);
   });
 
-  // Chat list row menu (delete chat)
+  // Chat list row menu (delete chat, video chat)
   document.addEventListener('war-chat-chat-action', (e) => {
     const { peer, action } = e.detail || {};
-    if (!peer || action !== 'delete-chat') return;
-    if (!confirm('Delete this chat and all messages?')) return;
-    deleteChatWithPeer(peer);
+    if (!peer) return;
+    if (action === 'delete-chat') {
+      if (!confirm('Delete this chat and all messages?')) return;
+      deleteChatWithPeer(peer);
+    } else if (action === 'video-chat') {
+      if (groups.isGroupPeer(peer)) {
+        alert('Video chat is only available for 1:1 chats.');
+        return;
+      }
+      startVideoChat(peer);
+    }
   });
 
   // Message context menu (delete single message)

@@ -84,7 +84,7 @@ customElements.define('war-chat-chat-list', class WarChatChatList extends HTMLEl
         menuBtn.onclick = (e) => {
           e.stopPropagation();
           e.preventDefault();
-          const items = [{ label: 'Delete chat', action: 'delete-chat' }];
+          const items = [{ label: 'Video chat', action: 'video-chat' }, { label: 'Delete chat', action: 'delete-chat' }];
           showMenu(menuBtn, items, (action) => {
             this.dispatchEvent(new CustomEvent('war-chat-chat-action', { detail: { peer: rowPeer, action }, bubbles: true }));
           });
