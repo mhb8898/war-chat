@@ -13,6 +13,8 @@ let encodeHeight = VIDEO_HEIGHT;
 let remoteWidth = VIDEO_WIDTH;
 let remoteHeight = VIDEO_HEIGHT;
 const KEYFRAME_INTERVAL = 30; // keyframe every 1s at 30fps
+/** Skip encoding when queue exceeds this (low upload = drop frames instead of backlog). */
+const MAX_ENCODE_QUEUE = 2;
 const VIDEO_BITRATE = 400_000;
 
 let localStream = null;
@@ -315,6 +317,8 @@ function handleFrame(msg) {
 
 function encodeAndSend(videoEl) {
   if (!videoEncoder || !peerUsername || videoEl.readyState < 2) return;
+  // When upload is slow, encoder queue grows; skip this frame so we send newer content instead of a backlog
+  if (typeof videoEncoder.encodeQueueSize === 'number' && videoEncoder.encodeQueueSize > MAX_ENCODE_QUEUE) return;
 
   const forceKeyframe = requestKeyframe || encodeFrameCount < 3 || (encodeFrameCount % KEYFRAME_INTERVAL === 0);
   if (requestKeyframe) requestKeyframe = false;
