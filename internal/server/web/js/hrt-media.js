@@ -26,6 +26,23 @@ let lastKeyframeRequestTs = 0;
 /** Codec the remote peer is using (received via control); decoder must use this, not selectedCodec. */
 let remoteCodec = null;
 
+// --- Audio (Opus) ---
+const AUDIO_SAMPLE_RATE = 48000;
+const AUDIO_CHANNELS = 1;
+const AUDIO_FRAME_MS = 20;
+const AUDIO_FRAMES_PER_20MS = (AUDIO_SAMPLE_RATE * AUDIO_FRAME_MS) / 1000; // 960
+let audioContext = null;
+let audioEncoder = null;
+let audioDecoder = null;
+let audioCaptureNode = null;
+let audioInputBuffer = new Float32Array(0);
+let audioInputBufferLen = 0;
+let audioEncodeTimestamp = 0;
+let remoteAudioContext = null;
+let remoteAudioQueue = [];
+let remoteAudioNextStartTime = 0;
+let audioMuted = false;
+
 function arrayBufferToBase64(buf) {
   const bytes = new Uint8Array(buf);
   let binary = '';
@@ -149,9 +166,108 @@ function decodeIncoming(data, type) {
   }
 }
 
+function pushAudioSamples(samples) {
+  if (!peerUsername || audioMuted || !audioEncoder || audioEncoder.state !== 'configured') return;
+  const need = AUDIO_FRAMES_PER_20MS;
+  const newLen = audioInputBufferLen + samples.length;
+  if (audioInputBuffer.length < newLen) {
+    const next = new Float32Array(Math.max(newLen, audioInputBuffer.length * 2));
+    next.set(audioInputBuffer.subarray(0, audioInputBufferLen));
+    audioInputBuffer = next;
+  }
+  audioInputBuffer.set(samples, audioInputBufferLen);
+  audioInputBufferLen = newLen;
+  while (audioInputBufferLen >= need) {
+    const frame = audioInputBuffer.slice(0, need);
+    audioInputBuffer.copyWithin(0, need, audioInputBufferLen);
+    audioInputBufferLen -= need;
+    const timestampUs = audioEncodeTimestamp * 1000;
+    audioEncodeTimestamp += (need / AUDIO_SAMPLE_RATE) * 1e6;
+    if (typeof AudioData !== 'undefined') {
+      try {
+        const byteLen = need * 4; // f32
+        const buf = frame.buffer.byteLength >= byteLen ? frame.buffer.slice(0, byteLen) : frame.buffer;
+        const data = new AudioData({
+          format: 'f32-planar',
+          sampleRate: AUDIO_SAMPLE_RATE,
+          numberOfFrames: need,
+          numberOfChannels: AUDIO_CHANNELS,
+          timestamp: timestampUs,
+          data: buf,
+        });
+        audioEncoder.encode(data);
+        data.close();
+      } catch (_) {}
+    }
+  }
+}
+
+function playRemoteAudio(audioData) {
+  if (typeof AudioContext === 'undefined') return;
+  if (!remoteAudioContext) {
+    remoteAudioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: AUDIO_SAMPLE_RATE });
+  }
+  const ctx = remoteAudioContext;
+  if (ctx.state === 'suspended') ctx.resume();
+  const numFrames = audioData.numberOfFrames;
+  const numChannels = audioData.numberOfChannels;
+  const duration = numFrames / audioData.sampleRate;
+  const buffer = ctx.createBuffer(numChannels, numFrames, audioData.sampleRate);
+  for (let c = 0; c < numChannels; c++) {
+    const plane = new Float32Array(numFrames);
+    audioData.copyTo(plane, { planeIndex: c });
+    buffer.copyToChannel(plane, c);
+  }
+  audioData.close();
+  const now = ctx.currentTime;
+  const startTime = Math.max(now, remoteAudioNextStartTime);
+  remoteAudioNextStartTime = startTime + duration;
+  const source = ctx.createBufferSource();
+  source.buffer = buffer;
+  source.connect(ctx.destination);
+  source.start(startTime);
+}
+
+function decodeIncomingAudio(data) {
+  if (typeof AudioDecoder === 'undefined' || typeof EncodedAudioChunk === 'undefined') return;
+  const buf = typeof data === 'string' ? base64ToArrayBuffer(data) : data;
+  if (!audioDecoder) {
+    try {
+      audioDecoder = new AudioDecoder({
+        output: (audioData) => {
+          playRemoteAudio(audioData);
+        },
+        error: (e) => {
+          console.warn('AudioDecoder error:', e);
+          audioDecoder = null;
+        },
+      });
+      audioDecoder.configure({ codec: 'opus', sampleRate: AUDIO_SAMPLE_RATE, numberOfChannels: AUDIO_CHANNELS });
+    } catch (err) {
+      console.warn('AudioDecoder opus not supported:', err);
+      return;
+    }
+  }
+  if (audioDecoder.state !== 'configured') return;
+  try {
+    const bytes = buf instanceof ArrayBuffer ? new Uint8Array(buf) : (buf instanceof Uint8Array ? buf : new Uint8Array(buf));
+    const chunk = new EncodedAudioChunk({
+      type: 'key',
+      timestamp: 0,
+      data: bytes,
+    });
+    audioDecoder.decode(chunk);
+  } catch (e) {
+    console.warn('Audio decode error:', e);
+  }
+}
+
 function handleFrame(msg) {
   if (msg.stream === 'video' && msg.payload != null) {
     decodeIncoming(msg.payload, msg.isKeyframe ? 'key' : 'delta');
+  }
+  if (msg.stream === 'audio' && msg.payload != null) {
+    decodeIncomingAudio(msg.payload);
   }
   if (msg.stream === 'control' && msg.payload && typeof msg.payload === 'object') {
     if (msg.payload.t === 'keyframe') requestKeyframe = true;
@@ -192,6 +308,122 @@ function startEncodeLoop(videoEl) {
   }, intervalMs);
 }
 
+function startEncodeLoopWhenReady(videoEl) {
+  if (videoEl.readyState >= 2) {
+    startEncodeLoop(videoEl);
+    return;
+  }
+  videoEl.addEventListener('loadeddata', () => {
+    if (!rafId) startEncodeLoop(videoEl);
+  }, { once: true });
+  setTimeout(() => {
+    if (!rafId && videoEl.readyState >= 2) startEncodeLoop(videoEl);
+  }, 800);
+}
+
+const AUDIO_WORKLET_PROCESSOR = `
+class CaptureProcessor extends AudioWorkletProcessor {
+  process(inputs) {
+    const input = inputs[0];
+    if (input && input.length > 0) {
+      const ch0 = input[0];
+      if (ch0 && ch0.length > 0) this.port.postMessage(ch0.slice(0));
+    }
+    return true;
+  }
+}
+registerProcessor('capture-processor', CaptureProcessor);
+`;
+
+function startAudioCapture(stream) {
+  if (!stream || !stream.getAudioTracks().length) return;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  if (!audioContext || audioContext.state === 'closed') {
+    audioContext = new Ctx({ sampleRate: AUDIO_SAMPLE_RATE });
+  }
+  if (audioContext.state === 'suspended') {
+    audioContext.resume().catch(() => {});
+  }
+  const source = audioContext.createMediaStreamSource(stream);
+  const blob = new Blob([AUDIO_WORKLET_PROCESSOR], { type: 'application/javascript' });
+  const workletUrl = URL.createObjectURL(blob);
+  audioContext.audioWorklet.addModule(workletUrl).then(() => {
+    URL.revokeObjectURL(workletUrl);
+    try {
+      if (audioContext && audioContext.state === 'suspended') {
+        audioContext.resume().catch(() => {});
+      }
+      if (!audioContext) return;
+      audioCaptureNode = new AudioWorkletNode(audioContext, 'capture-processor');
+      audioCaptureNode.port.onmessage = (e) => {
+        if (e.data && e.data.length) pushAudioSamples(e.data);
+      };
+      source.connect(audioCaptureNode);
+      const silent = audioContext.createGain();
+      silent.gain.value = 0;
+      audioCaptureNode.connect(silent);
+      silent.connect(audioContext.destination);
+    } catch (err) {
+      console.warn('Audio capture not started:', err);
+    }
+  }).catch((err) => {
+    URL.revokeObjectURL(workletUrl);
+    console.warn('AudioWorklet addModule failed:', err);
+  });
+}
+
+function stopAudioCapture() {
+  if (audioCaptureNode && audioContext) {
+    try {
+      audioCaptureNode.disconnect();
+      audioCaptureNode = null;
+    } catch (_) {}
+    try {
+      audioContext.close();
+    } catch (_) {}
+    audioContext = null;
+  }
+  audioInputBuffer = new Float32Array(0);
+  audioInputBufferLen = 0;
+  audioEncodeTimestamp = 0;
+}
+
+async function maybeStartAudioEncoder() {
+  if (!peerUsername || !localStream || audioEncoder) return;
+  if (typeof AudioEncoder === 'undefined' || typeof AudioData === 'undefined') return;
+  try {
+    const config = {
+      codec: 'opus',
+      sampleRate: AUDIO_SAMPLE_RATE,
+      numberOfChannels: AUDIO_CHANNELS,
+      bitrate: 32000,
+    };
+    const supported = AudioEncoder.isConfigSupported ? await AudioEncoder.isConfigSupported(config) : { supported: true };
+    if (supported && !supported.supported) return;
+    audioEncoder = new AudioEncoder({
+      output: (chunk) => {
+        if (!peerUsername || audioMuted) return;
+        let buf;
+        if (chunk.byteLength > 0 && typeof chunk.copyTo === 'function') {
+          buf = new ArrayBuffer(chunk.byteLength);
+          chunk.copyTo(buf);
+        } else {
+          buf = new ArrayBuffer(0);
+        }
+        hrt.sendFrame(peerUsername, 'audio', arrayBufferToBase64(buf), false);
+      },
+      error: (e) => {
+        console.warn('AudioEncoder error:', e);
+        audioEncoder = null;
+      },
+    });
+    audioEncoder.configure(config);
+  } catch (err) {
+    console.warn('Audio encode not supported:', err);
+  }
+}
+
 function stopEncodeLoop() {
   if (rafId != null) {
     clearInterval(rafId);
@@ -215,6 +447,12 @@ export function startLocalMedia(peer) {
   const btnHangup = document.getElementById('videoBtnHangup');
 
   if (!localPreview) return;
+
+  // Create AudioContext synchronously while still in user gesture (video chat click)
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (Ctx && (!audioContext || audioContext.state === 'closed')) {
+    audioContext = new Ctx({ sampleRate: AUDIO_SAMPLE_RATE });
+  }
 
   const updateStatus = (text) => {
     if (statusEl) statusEl.textContent = text;
@@ -281,7 +519,7 @@ export function startLocalMedia(peer) {
         videoEncoder.configure(encoderConfig);
       }
       hrt.sendFrame(peerUsername, 'control', { t: 'codec', codec: selectedCodec });
-      startEncodeLoop(localPreview);
+      startEncodeLoopWhenReady(localPreview);
       updateStatus('Connected');
     } catch (e) {
       updateStatus('Video encode not supported: ' + (e?.message || 'WebCodecs required'));
@@ -291,6 +529,7 @@ export function startLocalMedia(peer) {
   hrt.setOnPeerJoined((joinedPeer) => {
     peerUsername = joinedPeer;
     maybeStartEncoder();
+    maybeStartAudioEncoder();
   });
   hrt.setOnPeerLeft(() => {
     peerUsername = null;
@@ -300,12 +539,37 @@ export function startLocalMedia(peer) {
       try { videoEncoder.close(); } catch (_) {}
       videoEncoder = null;
     }
+    if (audioEncoder) {
+      try { audioEncoder.close(); } catch (_) {}
+      audioEncoder = null;
+    }
     updateStatus('Peer left');
+  });
+  hrt.setOnConnectionClosed(() => {
+    peerUsername = null;
+    remoteCodec = null;
+    stopEncodeLoop();
+    if (videoEncoder) {
+      try { videoEncoder.close(); } catch (_) {}
+      videoEncoder = null;
+    }
+    if (audioEncoder) {
+      try { audioEncoder.close(); } catch (_) {}
+      audioEncoder = null;
+    }
   });
   hrt.setOnEndCall(stopLocalMedia);
 
   if (btnHangup) {
     btnHangup.onclick = () => hrt.endVideoCall();
+  }
+
+  const videoView = document.getElementById('view-video');
+  if (videoView) {
+    videoView.addEventListener('click', () => {
+      if (audioContext && audioContext.state === 'suspended') audioContext.resume().catch(() => {});
+      if (remoteAudioContext && remoteAudioContext.state === 'suspended') remoteAudioContext.resume().catch(() => {});
+    }, { once: true });
   }
 
   let videoEnabled = true;
@@ -320,9 +584,11 @@ export function startLocalMedia(peer) {
   }
   if (btnMute) {
     btnMute.onclick = () => {
+      audioMuted = !audioMuted;
       if (localStream) {
-        localStream.getAudioTracks().forEach((t) => { t.enabled = !t.enabled; });
+        localStream.getAudioTracks().forEach((t) => { t.enabled = !audioMuted; });
       }
+      btnMute.textContent = audioMuted ? 'Unmute' : 'Mute';
     };
   }
 
@@ -330,6 +596,7 @@ export function startLocalMedia(peer) {
     .then((stream) => {
       localStream = stream;
       localPreview.srcObject = stream;
+      startAudioCapture(stream);
       updateStatus('Waiting for peer…');
       maybeStartEncoder();
     })
@@ -343,6 +610,7 @@ export function startLocalMedia(peer) {
  */
 export function stopLocalMedia() {
   stopEncodeLoop();
+  stopAudioCapture();
   if (localStream) {
     localStream.getTracks().forEach((t) => t.stop());
     localStream = null;
@@ -357,6 +625,21 @@ export function stopLocalMedia() {
     try { videoDecoder.close(); } catch (_) {}
     videoDecoder = null;
   }
+  if (audioEncoder) {
+    try { audioEncoder.close(); } catch (_) {}
+    audioEncoder = null;
+  }
+  if (audioDecoder) {
+    try { audioDecoder.close(); } catch (_) {}
+    audioDecoder = null;
+  }
+  if (remoteAudioContext) {
+    try { remoteAudioContext.close(); } catch (_) {}
+    remoteAudioContext = null;
+  }
+  remoteAudioQueue = [];
+  remoteAudioNextStartTime = 0;
+  audioMuted = false;
   decoderConfigured = false;
   decoderNeedsKeyframe = true;
   lastKeyframeRequestTs = 0;
