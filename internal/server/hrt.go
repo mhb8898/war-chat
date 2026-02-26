@@ -133,24 +133,27 @@ func (c *hrtClient) readPump() {
 			continue
 		}
 
-		// Forward frame: parse only routing envelope
+		// Forward frame: parse only routing envelope; keep payload as raw to avoid re-encoding (lower latency)
 		var frame struct {
-			To        string      `json:"to"`
-			Stream    string      `json:"stream"`
-			IsKeyframe bool       `json:"isKeyframe"`
-			Payload   interface{} `json:"payload"`
+			To         string          `json:"to"`
+			Stream     string          `json:"stream"`
+			IsKeyframe bool            `json:"isKeyframe"`
+			Payload    json.RawMessage `json:"payload"`
 		}
 		if err := json.Unmarshal(message, &frame); err != nil || frame.To == "" {
 			continue
 		}
 
-		out := map[string]interface{}{
-			"type":   "frame",
-			"from":   c.username,
-			"to":     frame.To,
-			"stream": frame.Stream,
-			"isKeyframe": frame.IsKeyframe,
-			"payload":    frame.Payload,
+		out := struct {
+			Type       string          `json:"type"`
+			From       string          `json:"from"`
+			To         string          `json:"to"`
+			Stream     string          `json:"stream"`
+			IsKeyframe bool            `json:"isKeyframe"`
+			Payload    json.RawMessage `json:"payload"`
+		}{
+			Type: "frame", From: c.username, To: frame.To,
+			Stream: frame.Stream, IsKeyframe: frame.IsKeyframe, Payload: frame.Payload,
 		}
 		data := mustMarshal(out)
 
