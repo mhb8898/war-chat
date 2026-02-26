@@ -411,7 +411,7 @@ async function maybeStartAudioEncoder() {
         } else {
           buf = new ArrayBuffer(0);
         }
-        hrt.sendFrame(peerUsername, 'audio', arrayBufferToBase64(buf), false);
+        hrt.sendFrameBinary(peerUsername, 1, buf, false);
       },
       error: (e) => {
         console.warn('AudioEncoder error:', e);
@@ -496,8 +496,7 @@ export function startLocalMedia(peer) {
           } else {
             buf = new ArrayBuffer(0);
           }
-          const b64 = arrayBufferToBase64(buf);
-          hrt.sendFrame(peerUsername, 'video', b64, chunk.type === 'key');
+          hrt.sendFrameBinary(peerUsername, 0, buf, chunk.type === 'key');
         },
         error: (e) => console.warn('VideoEncoder error:', e),
       });

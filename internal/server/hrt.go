@@ -16,6 +16,10 @@ const (
 	hrtBinaryHeaderMin = 7 // streamType(1) + flags(1) + toLen(1) + at least 1 byte to + payloadLen(4)
 )
 
+var hrtBufPool = sync.Pool{
+	New: func() interface{} { return make([]byte, 0, hrtMaxFrameSize) },
+}
+
 type hrtOut struct {
 	data   []byte
 	binary bool
@@ -68,6 +72,9 @@ func (c *hrtClient) writePump() {
 		if err := c.conn.WriteMessage(msgType, out.data); err != nil {
 			break
 		}
+		if out.binary && out.data != nil {
+			hrtBufPool.Put(out.data[:0])
+		}
 	}
 }
 
@@ -115,7 +122,9 @@ func (c *hrtClient) readPump() {
 			if fromLen > 255 {
 				continue
 			}
-			out := make([]byte, 7+fromLen+int(payloadLen))
+			need := 7 + fromLen + int(payloadLen)
+			out := hrtBufPool.Get().([]byte)
+			out = out[:need]
 			out[0] = streamType
 			out[1] = flags
 			out[2] = byte(fromLen)
@@ -239,7 +248,7 @@ func (h *HRTHub) removeClient(c *hrtClient) {
 	close(c.send)
 }
 
-func (h *HRTHub) sendToPeer(roomId, username string, data []byte, binary bool) {
+func (h *HRTHub) sendToPeer(roomId, username string, data []byte, binary bool) (sent bool) {
 	h.mu.RLock()
 	room := h.rooms[roomId]
 	client := room[username]
@@ -248,14 +257,18 @@ func (h *HRTHub) sendToPeer(roomId, username string, data []byte, binary bool) {
 	if client != nil {
 		select {
 		case client.send <- hrtOut{data: data, binary: binary}:
+			return true
 		default:
 			// backpressure: drop (e.g. audio/video)
 		}
 	}
+	return false
 }
 
 func (h *HRTHub) sendToPeerBinary(roomId, username string, data []byte) {
-	h.sendToPeer(roomId, username, data, true)
+	if !h.sendToPeer(roomId, username, data, true) {
+		hrtBufPool.Put(data[:0])
+	}
 }
 
 func (h *HRTHub) sendToClient(c *hrtClient, data []byte, binary bool) {
