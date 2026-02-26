@@ -17,12 +17,16 @@ const (
 )
 
 var hrtBufPool = sync.Pool{
-	New: func() interface{} { return make([]byte, 0, hrtMaxFrameSize) },
+	New: func() interface{} {
+		b := make([]byte, 0, hrtMaxFrameSize)
+		return &b
+	},
 }
 
 type hrtOut struct {
-	data   []byte
-	binary bool
+	data    []byte
+	dataPtr *[]byte // for binary: pool pointer to Put after send (nil for text)
+	binary  bool
 }
 
 type hrtClient struct {
@@ -72,8 +76,9 @@ func (c *hrtClient) writePump() {
 		if err := c.conn.WriteMessage(msgType, out.data); err != nil {
 			break
 		}
-		if out.binary && out.data != nil {
-			hrtBufPool.Put(out.data[:0])
+		if out.dataPtr != nil {
+			*out.dataPtr = (*out.dataPtr)[:0]
+			hrtBufPool.Put(out.dataPtr)
 		}
 	}
 }
@@ -123,15 +128,16 @@ func (c *hrtClient) readPump() {
 				continue
 			}
 			need := 7 + fromLen + int(payloadLen)
-			out := hrtBufPool.Get().([]byte)
-			out = out[:need]
+			outPtr := hrtBufPool.Get().(*[]byte)
+			*outPtr = (*outPtr)[:need]
+			out := *outPtr
 			out[0] = streamType
 			out[1] = flags
 			out[2] = byte(fromLen)
 			copy(out[3:], fromBytes)
 			binary.LittleEndian.PutUint32(out[3+fromLen:], uint32(payloadLen))
 			copy(out[7+fromLen:], payload)
-			c.hub.sendToPeerBinary(c.roomId, to, out)
+			c.hub.sendToPeerBinary(c.roomId, to, outPtr)
 			continue
 		}
 
@@ -177,7 +183,7 @@ func (c *hrtClient) readPump() {
 				c.hub.sendToPeer(c.roomId, peer, mustMarshal(map[string]interface{}{
 					"type":     "peer_joined",
 					"username": c.username,
-				}), false)
+				}), nil, false)
 			}
 
 			c.hub.sendToClient(c, mustMarshal(map[string]interface{}{
@@ -216,7 +222,7 @@ func (c *hrtClient) readPump() {
 		if frame.To == "*" {
 			c.hub.broadcastInRoom(c.roomId, c.username, data)
 		} else {
-			c.hub.sendToPeer(c.roomId, frame.To, data, false)
+			c.hub.sendToPeer(c.roomId, frame.To, data, nil, false)
 		}
 	}
 }
@@ -248,7 +254,7 @@ func (h *HRTHub) removeClient(c *hrtClient) {
 	close(c.send)
 }
 
-func (h *HRTHub) sendToPeer(roomId, username string, data []byte, binary bool) (sent bool) {
+func (h *HRTHub) sendToPeer(roomId, username string, data []byte, dataPtr *[]byte, binary bool) (sent bool) {
 	h.mu.RLock()
 	room := h.rooms[roomId]
 	client := room[username]
@@ -256,7 +262,7 @@ func (h *HRTHub) sendToPeer(roomId, username string, data []byte, binary bool) (
 
 	if client != nil {
 		select {
-		case client.send <- hrtOut{data: data, binary: binary}:
+		case client.send <- hrtOut{data: data, dataPtr: dataPtr, binary: binary}:
 			return true
 		default:
 			// backpressure: drop (e.g. audio/video)
@@ -265,9 +271,10 @@ func (h *HRTHub) sendToPeer(roomId, username string, data []byte, binary bool) (
 	return false
 }
 
-func (h *HRTHub) sendToPeerBinary(roomId, username string, data []byte) {
-	if !h.sendToPeer(roomId, username, data, true) {
-		hrtBufPool.Put(data[:0])
+func (h *HRTHub) sendToPeerBinary(roomId, username string, dataPtr *[]byte) {
+	if !h.sendToPeer(roomId, username, *dataPtr, dataPtr, true) {
+		*dataPtr = (*dataPtr)[:0]
+		hrtBufPool.Put(dataPtr)
 	}
 }
 
