@@ -191,6 +191,32 @@ export function showView(name, param) {
       headerEl.removeAttribute('show-profile');
       headerEl.setAttribute('show-logout', '');
     }
+  } else if (name === 'room') {
+    const el = document.getElementById('view-video');
+    if (el) el.classList.add('active');
+    if (headerEl) {
+      headerEl.setAttribute('title', 'Meeting room');
+      headerEl.setAttribute('show-back', '');
+      headerEl.removeAttribute('show-video-chat');
+      headerEl.removeAttribute('show-add-member');
+      headerEl.removeAttribute('show-leave-group');
+      headerEl.removeAttribute('show-new-chat');
+      headerEl.removeAttribute('show-profile');
+      headerEl.setAttribute('show-logout', '');
+    }
+  } else if (name === 'lobby') {
+    const el = document.getElementById('view-lobby');
+    if (el) el.classList.add('active');
+    if (headerEl) {
+      headerEl.setAttribute('title', 'Join meeting');
+      headerEl.removeAttribute('show-back');
+      headerEl.removeAttribute('show-video-chat');
+      headerEl.removeAttribute('show-add-member');
+      headerEl.removeAttribute('show-leave-group');
+      headerEl.removeAttribute('show-new-chat');
+      headerEl.removeAttribute('show-profile');
+      headerEl.removeAttribute('show-logout');
+    }
   } else {
     if (headerEl) {
       headerEl.removeAttribute('show-back');
@@ -263,13 +289,23 @@ let _prevRenderView = null;
 
 export function render() {
   const { view, param } = getRoute();
-  if (_prevRenderView === 'video' && view !== 'video') {
+  if ((_prevRenderView === 'video' || _prevRenderView === 'room') &&
+      view !== 'video' && view !== 'room') {
     import('./hrt.js').then((m) => m.endVideoCall()).catch(() => {});
+    import('./meeting.js').then((m) => { m.stopAdmitPolling(); m.stopKnockPolling(); }).catch(() => {});
+  }
+  if (_prevRenderView === 'lobby' && view !== 'lobby') {
+    import('./meeting.js').then((m) => m.stopKnockPolling()).catch(() => {});
   }
   _prevRenderView = view;
   document.querySelectorAll('.view').forEach((v) => v.classList.remove('active'));
 
   if (!auth.isLoggedIn() && view !== 'setup') {
+    if (view === 'room' && param) {
+      showView('lobby', param);
+      import('./meeting.js').then((m) => m.startLobbyView(param)).catch(console.error);
+      return;
+    }
     if (view === 'chat' && param) {
       sessionStorage.setItem('war-chat-redirect', param);
     }
@@ -322,6 +358,14 @@ export function render() {
             const el = document.getElementById('videoStatus');
             if (el) el.textContent = 'Failed: ' + (e?.message || 'Unknown error');
           });
+      } else {
+        navigate('chats');
+      }
+      break;
+    case 'room':
+      if (param) {
+        showView('room', param);
+        import('./meeting.js').then((m) => m.startRoomView(param)).catch(console.error);
       } else {
         navigate('chats');
       }

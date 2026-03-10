@@ -14,6 +14,24 @@ import (
 
 var ErrDuplicateUsername = errors.New("username already taken with a different key")
 
+// CallRoom is a shareable meeting room with a 24-hour TTL.
+type CallRoom struct {
+	Token     string `json:"token"`
+	CreatedBy string `json:"createdBy"`
+	CreatedAt int64  `json:"createdAt"`
+	ExpiresAt int64  `json:"expiresAt"`
+}
+
+// GuestKnock is an in-memory pending/admitted guest. Not persisted.
+type GuestKnock struct {
+	KnockID     string
+	RoomToken   string
+	DisplayName string
+	CreatedAt   int64
+	Admitted    bool
+	Denied      bool
+}
+
 // InviteToken is a single-use registration token.
 type InviteToken struct {
 	Token     string `json:"token"`
@@ -46,8 +64,11 @@ type Store struct {
 	offlineDir  string
 	groupsDir   string
 	invitesPath string
+	roomsPath   string
 	keys        map[string]string
 	invites     map[string]*InviteToken
+	rooms       map[string]*CallRoom
+	knocks      map[string]*GuestKnock
 }
 
 func NewStore(dataDir string) (*Store, error) {
@@ -55,6 +76,7 @@ func NewStore(dataDir string) (*Store, error) {
 	offlineDir := filepath.Join(dataDir, "offline")
 	groupsDir := filepath.Join(dataDir, "groups")
 	invitesPath := filepath.Join(dataDir, "invites.json")
+	roomsPath := filepath.Join(dataDir, "rooms.json")
 
 	if err := os.MkdirAll(offlineDir, 0755); err != nil {
 		return nil, err
@@ -68,14 +90,20 @@ func NewStore(dataDir string) (*Store, error) {
 		offlineDir:  offlineDir,
 		groupsDir:   groupsDir,
 		invitesPath: invitesPath,
+		roomsPath:   roomsPath,
 		keys:        make(map[string]string),
 		invites:     make(map[string]*InviteToken),
+		rooms:       make(map[string]*CallRoom),
+		knocks:      make(map[string]*GuestKnock),
 	}
 
 	if err := s.loadKeys(); err != nil && !os.IsNotExist(err) {
 		return nil, err
 	}
 	if err := s.loadInvites(); err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	if err := s.loadRooms(); err != nil && !os.IsNotExist(err) {
 		return nil, err
 	}
 
@@ -473,6 +501,137 @@ func (s *Store) ResetOffline() error {
 		_ = os.Remove(sub)
 	}
 	return nil
+}
+
+// --- CallRoom methods ---
+
+func (s *Store) loadRooms() error {
+	data, err := os.ReadFile(s.roomsPath)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(data, &s.rooms)
+}
+
+func (s *Store) saveRooms() error {
+	data, err := json.MarshalIndent(s.rooms, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(s.roomsPath, data, 0600)
+}
+
+// CreateCallRoom generates a random room token with a 24h TTL.
+func (s *Store) CreateCallRoom(createdBy string) (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	token := hex.EncodeToString(b)
+	now := time.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rooms[token] = &CallRoom{
+		Token:     token,
+		CreatedBy: createdBy,
+		CreatedAt: now.UnixMilli(),
+		ExpiresAt: now.Add(24 * time.Hour).UnixMilli(),
+	}
+	return token, s.saveRooms()
+}
+
+// GetCallRoom returns the room for the given token, or nil if missing or expired.
+func (s *Store) GetCallRoom(token string) *CallRoom {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	r, ok := s.rooms[token]
+	if !ok || time.Now().UnixMilli() > r.ExpiresAt {
+		return nil
+	}
+	return r
+}
+
+// PruneExpiredRooms removes rooms past their ExpiresAt, saving if any were deleted.
+func (s *Store) PruneExpiredRooms() error {
+	now := time.Now().UnixMilli()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	changed := false
+	for token, r := range s.rooms {
+		if now > r.ExpiresAt {
+			delete(s.rooms, token)
+			changed = true
+		}
+	}
+	if changed {
+		return s.saveRooms()
+	}
+	return nil
+}
+
+// --- GuestKnock methods (in-memory only) ---
+
+func (s *Store) CreateKnock(roomToken, displayName string) *GuestKnock {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	knock := &GuestKnock{
+		KnockID:     hex.EncodeToString(b),
+		RoomToken:   roomToken,
+		DisplayName: displayName,
+		CreatedAt:   time.Now().UnixMilli(),
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.knocks[knock.KnockID] = knock
+	return knock
+}
+
+func (s *Store) GetKnock(knockID string) *GuestKnock {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.knocks[knockID]
+}
+
+func (s *Store) GetAdmittedKnock(roomToken, knockID string) *GuestKnock {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	k, ok := s.knocks[knockID]
+	if !ok || k.RoomToken != roomToken || !k.Admitted {
+		return nil
+	}
+	return k
+}
+
+func (s *Store) ListPendingKnocks(roomToken string) []*GuestKnock {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []*GuestKnock
+	for _, k := range s.knocks {
+		if k.RoomToken == roomToken && !k.Admitted && !k.Denied {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+func (s *Store) AdmitKnock(knockID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if k, ok := s.knocks[knockID]; ok {
+		k.Admitted = true
+		return true
+	}
+	return false
+}
+
+func (s *Store) DenyKnock(knockID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if k, ok := s.knocks[knockID]; ok {
+		k.Denied = true
+		return true
+	}
+	return false
 }
 
 // ResetGroups removes all group files.

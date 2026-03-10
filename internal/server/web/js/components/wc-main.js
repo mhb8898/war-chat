@@ -9,6 +9,7 @@ customElements.define('war-chat-main', class WarChatMain extends HTMLElement {
           <div class="new-chat-form">
             <button id="btnNewChat" style="width:100%">New chat</button>
             <button id="btnNewGroup" style="width:100%;margin-top:0.25rem">New group</button>
+            <button id="btnNewMeeting" style="width:100%;margin-top:0.25rem">New meeting</button>
           </div>
           <war-chat-group-invites id="group-invites-section" class="group-invites-section hidden"></war-chat-group-invites>
           <war-chat-chat-list id="chat-list" class="chat-list"></war-chat-chat-list>

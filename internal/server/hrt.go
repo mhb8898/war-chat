@@ -154,17 +154,28 @@ func (c *hrtClient) readPump() {
 				continue
 			}
 			var join struct {
-				RoomId   string `json:"roomId"`
-				Username string `json:"username"`
+				RoomId     string `json:"roomId"`
+				Username   string `json:"username"`
+				KnockToken string `json:"knockToken"`
 			}
-			if err := json.Unmarshal(message, &join); err != nil || join.RoomId == "" || join.Username == "" {
+			if err := json.Unmarshal(message, &join); err != nil || join.RoomId == "" {
 				continue
 			}
-			// Optional: verify username is registered
-			if _, ok := c.hub.store.GetPubKey(join.Username); !ok {
-				continue
+			if join.KnockToken != "" {
+				knock := c.hub.store.GetAdmittedKnock(join.RoomId, join.KnockToken)
+				if knock == nil {
+					continue
+				}
+				c.username = knock.DisplayName
+			} else {
+				if join.Username == "" {
+					continue
+				}
+				if _, ok := c.hub.store.GetPubKey(join.Username); !ok {
+					continue
+				}
+				c.username = join.Username
 			}
-			c.username = join.Username
 			c.roomId = join.RoomId
 			c.hub.mu.Lock()
 			if c.hub.rooms[c.roomId] == nil {

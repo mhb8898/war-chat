@@ -38,6 +38,9 @@ func (s *Server) setupRoutes() {
 	http.HandleFunc("/ws", s.handleWebSocket)
 	http.HandleFunc("/hrt/v1", s.handleHRT)
 	http.HandleFunc("/u/", s.handleShareableLink)
+	http.HandleFunc("/r/", s.handleRoomRedirect)
+	http.HandleFunc("/rooms", s.handleCreateRoom)
+	http.HandleFunc("/rooms/", s.handleRoomRoutes)
 	http.HandleFunc("/admin/", s.handleAdmin)
 	http.Handle("/", s.handleStatic())
 }
@@ -303,6 +306,187 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "action": "reset-invites"})
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func (s *Server) handleRoomRedirect(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	token := strings.TrimPrefix(r.URL.Path, "/r/")
+	token = strings.Trim(token, "/")
+	if token == "" {
+		http.Redirect(w, r, "/", http.StatusFound)
+		return
+	}
+	http.Redirect(w, r, "/#room/"+token, http.StatusFound)
+}
+
+func (s *Server) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		CreatedBy string `json:"createdBy"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+	if _, ok := s.store.GetPubKey(req.CreatedBy); !ok {
+		http.Error(w, "Unknown user", http.StatusForbidden)
+		return
+	}
+	token, err := s.store.CreateCallRoom(req.CreatedBy)
+	if err != nil {
+		http.Error(w, "Failed to create room", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"token": token})
+}
+
+func (s *Server) handleRoomRoutes(w http.ResponseWriter, r *http.Request) {
+	trimmed := strings.TrimPrefix(r.URL.Path, "/rooms/")
+	trimmed = strings.Trim(trimmed, "/")
+	parts := strings.Split(trimmed, "/")
+
+	if len(parts) == 0 || parts[0] == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	roomToken := parts[0]
+	room := s.store.GetCallRoom(roomToken)
+
+	switch {
+	case len(parts) == 1 && r.Method == http.MethodGet:
+		// GET /rooms/{token}
+		if room == nil {
+			http.Error(w, "Room not found or expired", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"token":     room.Token,
+			"createdBy": room.CreatedBy,
+			"expiresAt": room.ExpiresAt,
+		})
+
+	case len(parts) == 2 && parts[1] == "knock" && r.Method == http.MethodPost:
+		// POST /rooms/{token}/knock
+		if room == nil {
+			http.Error(w, "Room not found or expired", http.StatusNotFound)
+			return
+		}
+		var req struct {
+			DisplayName string `json:"displayName"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.DisplayName) == "" {
+			http.Error(w, "displayName required", http.StatusBadRequest)
+			return
+		}
+		knock := s.store.CreateKnock(roomToken, strings.TrimSpace(req.DisplayName))
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"knockId":     knock.KnockID,
+			"displayName": knock.DisplayName,
+		})
+
+	case len(parts) == 3 && parts[1] == "knock" && r.Method == http.MethodGet:
+		// GET /rooms/{token}/knock/{knockId}
+		knock := s.store.GetKnock(parts[2])
+		if knock == nil || knock.RoomToken != roomToken {
+			http.Error(w, "Knock not found", http.StatusNotFound)
+			return
+		}
+		status := "waiting"
+		if knock.Admitted {
+			status = "admitted"
+		} else if knock.Denied {
+			status = "denied"
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": status})
+
+	case len(parts) == 2 && parts[1] == "pending" && r.Method == http.MethodGet:
+		// GET /rooms/{token}/pending?ownerUsername=...
+		if room == nil {
+			http.Error(w, "Room not found or expired", http.StatusNotFound)
+			return
+		}
+		owner := r.URL.Query().Get("ownerUsername")
+		if owner != room.CreatedBy {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
+		knocks := s.store.ListPendingKnocks(roomToken)
+		type knockInfo struct {
+			KnockID     string `json:"knockId"`
+			DisplayName string `json:"displayName"`
+			CreatedAt   int64  `json:"createdAt"`
+		}
+		out := make([]knockInfo, 0, len(knocks))
+		for _, k := range knocks {
+			out = append(out, knockInfo{KnockID: k.KnockID, DisplayName: k.DisplayName, CreatedAt: k.CreatedAt})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(out)
+
+	case len(parts) == 2 && parts[1] == "admit" && r.Method == http.MethodPost:
+		// POST /rooms/{token}/admit
+		if room == nil {
+			http.Error(w, "Room not found or expired", http.StatusNotFound)
+			return
+		}
+		var req struct {
+			KnockID       string `json:"knockId"`
+			OwnerUsername string `json:"ownerUsername"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Bad request", http.StatusBadRequest)
+			return
+		}
+		if req.OwnerUsername != room.CreatedBy {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
+		if !s.store.AdmitKnock(req.KnockID) {
+			http.Error(w, "Knock not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+
+	case len(parts) == 2 && parts[1] == "deny" && r.Method == http.MethodPost:
+		// POST /rooms/{token}/deny
+		if room == nil {
+			http.Error(w, "Room not found or expired", http.StatusNotFound)
+			return
+		}
+		var req struct {
+			KnockID       string `json:"knockId"`
+			OwnerUsername string `json:"ownerUsername"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Bad request", http.StatusBadRequest)
+			return
+		}
+		if req.OwnerUsername != room.CreatedBy {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
+		if !s.store.DenyKnock(req.KnockID) {
+			http.Error(w, "Knock not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+
 	default:
 		http.NotFound(w, r)
 	}

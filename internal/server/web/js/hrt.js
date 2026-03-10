@@ -10,6 +10,9 @@ import { navigate } from './router.js';
 
 let hrtWs = null;
 let currentPeer = null;
+let currentRoomId = null;
+let guestKnockToken = null;
+let guestDisplayName = null;
 let userEndedCall = false;
 let reconnectTimeoutId = null;
 let reconnectBackoffMs = 1000;
@@ -61,7 +64,7 @@ function clearReconnectTimer() {
 }
 
 function scheduleReconnect() {
-  if (userEndedCall || !currentPeer) return;
+  if (userEndedCall || (!currentPeer && !currentRoomId)) return;
   if (reconnectTimeoutId != null) {
     clearTimeout(reconnectTimeoutId);
     reconnectTimeoutId = null;
@@ -76,8 +79,8 @@ function scheduleReconnect() {
 }
 
 function connect() {
-  if (userEndedCall || !currentPeer) return;
-  const roomId = getRoomId(currentPeer);
+  if (userEndedCall || (!currentPeer && !currentRoomId)) return;
+  const roomId = currentRoomId ?? getRoomId(currentPeer);
   const proto = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const host = typeof window !== 'undefined' ? window.location.host : '';
 
@@ -96,11 +99,13 @@ function connect() {
   hrtWs.onopen = () => {
     reconnectBackoffMs = 1000;
     clearReconnectTimer();
-    hrtWs.send(JSON.stringify({
+    const joinMsg = {
       type: 'join',
       roomId,
-      username: state.currentUsername,
-    }));
+      username: guestDisplayName || state.currentUsername,
+    };
+    if (guestKnockToken) joinMsg.knockToken = guestKnockToken;
+    hrtWs.send(JSON.stringify(joinMsg));
     status('Waiting for peer…');
   };
 
@@ -168,7 +173,7 @@ function connect() {
 
   hrtWs.onclose = () => {
     hrtWs = null;
-    if (userEndedCall || !currentPeer) {
+    if (userEndedCall || (!currentPeer && !currentRoomId)) {
       status('Disconnected');
       if (onPeerLeftCallback) onPeerLeftCallback(null);
       return;
@@ -263,6 +268,39 @@ export function endVideoCall() {
     hrtWs = null;
   }
   currentPeer = null;
+  currentRoomId = null;
+  guestKnockToken = null;
+  guestDisplayName = null;
   status('Ended');
   navigate('chats');
+}
+
+/**
+ * Start a video call in a shared meeting room (authenticated user or owner).
+ * @param {string} roomId - The meeting room token
+ */
+export function startVideoCallWithRoomId(roomId) {
+  if (hrtWs && hrtWs.readyState === WebSocket.OPEN) endVideoCall();
+  userEndedCall = false;
+  currentRoomId = roomId;
+  currentPeer = null;
+  guestKnockToken = null;
+  guestDisplayName = null;
+  connect();
+}
+
+/**
+ * Start a video call as an admitted guest.
+ * @param {string} roomId - The meeting room token
+ * @param {string} knockToken - The knockId returned by the server after admission
+ * @param {string} displayName - Guest's chosen display name
+ */
+export function startVideoCallAsGuest(roomId, knockToken, displayName) {
+  if (hrtWs && hrtWs.readyState === WebSocket.OPEN) endVideoCall();
+  userEndedCall = false;
+  currentRoomId = roomId;
+  currentPeer = null;
+  guestKnockToken = knockToken;
+  guestDisplayName = displayName;
+  connect();
 }

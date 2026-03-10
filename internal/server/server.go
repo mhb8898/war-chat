@@ -30,6 +30,7 @@ func New(dataDir, version string) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	_ = store.PruneExpiredRooms()
 
 	hub := NewHub(store)
 	go hub.Run()

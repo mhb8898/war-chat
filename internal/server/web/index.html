@@ -423,6 +423,9 @@
       opacity: 0.7;
       border-top: 1px solid #0f3460;
     }
+    .admit-row { display: flex; align-items: center; gap: 0.5rem; }
+    .admit-row span { flex: 1; font-size: 0.9rem; }
+    .admit-row button { padding: 0.35rem 0.75rem; font-size: 0.8rem; }
   </style>
 </head>
 <body>
@@ -447,7 +450,7 @@
         <war-chat-profile></war-chat-profile>
       </div>
 
-      <!-- Video call (1:1) -->
+      <!-- Video call (1:1) and meeting room -->
       <div id="view-video" class="view view-video">
         <div id="videoStatus">Connecting…</div>
         <div class="video-grid">
@@ -460,10 +463,25 @@
             <span class="video-label">You</span>
           </div>
         </div>
+        <div id="admitPanel" style="display:none;background:#16213e;border:1px solid #0f3460;border-radius:8px;padding:0.75rem 1rem;">
+          <div style="font-size:0.85rem;font-weight:600;margin-bottom:0.5rem;opacity:0.9">Guests waiting to join</div>
+          <div id="admitList" style="display:flex;flex-direction:column;gap:0.5rem;"></div>
+        </div>
         <div class="video-controls">
           <button type="button" id="videoBtnMute" class="btn-mute" title="Mute">Mute</button>
           <button type="button" id="videoBtnCamera" class="btn-camera" title="Camera">Camera</button>
           <button type="button" id="videoBtnHangup" class="btn-hangup" title="End call">End call</button>
+        </div>
+      </div>
+
+      <!-- Guest lobby -->
+      <div id="view-lobby" class="view" style="padding:2rem;display:flex;flex-direction:column;gap:1rem;align-items:center;justify-content:center;flex:1;">
+        <h2 style="margin:0">Join meeting</h2>
+        <p id="lobbyStatus" style="margin:0;opacity:0.8;text-align:center"></p>
+        <div id="lobbyForm" style="display:flex;flex-direction:column;gap:0.75rem;width:100%;max-width:320px;">
+          <input type="text" id="lobbyName" placeholder="Your display name" maxlength="64" autocomplete="off">
+          <button id="btnLobbyJoin">Join as guest</button>
+          <a href="#setup" style="text-align:center;color:#e94560;font-size:0.9rem">I have an account</a>
         </div>
       </div>
     </main>
@@ -504,6 +522,20 @@
       <div class="modal-actions">
         <button id="btnAddMemberCancel">Cancel</button>
         <button id="btnAddMemberConfirm">Add</button>
+      </div>
+    </div>
+  </war-chat-modal>
+
+  <war-chat-modal id="newMeetingModal">
+    <div class="modal-slot-content">
+      <h2 style="margin:0">New meeting</h2>
+      <p style="margin:0;opacity:0.8;font-size:0.9rem">Share this link — anyone can join as guest:</p>
+      <div style="display:flex;gap:0.5rem;align-items:center">
+        <input type="text" id="meetingLinkInput" readonly style="flex:1;font-size:0.8rem;font-family:monospace">
+        <button id="btnCopyMeetingLink" style="flex-shrink:0">Copy</button>
+      </div>
+      <div class="modal-actions">
+        <button id="btnStartMeeting" disabled>Start call</button>
       </div>
     </div>
   </war-chat-modal>

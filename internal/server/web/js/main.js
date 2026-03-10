@@ -9,6 +9,7 @@ import { API_BASE } from './config.js';
 import * as auth from './auth.js';
 import * as api from './api.js';
 import { navigate, render, showNewChatModal, showNewGroupModal, createGroupFromModal, showAddMemberModal, addMemberToGroupFromModal, sendMessageFromInput, leaveGroupAndNavigate, doLogout, deleteChatWithPeer, deleteMessageInChat, renderGroupInvites, renderChatList, getSelectedPeerFromRoute, startVideoChat, getRoute } from './app.js';
+import { showNewMeetingModal } from './meeting.js';
 import * as groups from './groups.js';
 import { initSetup, setSetupCallbacks } from './setup.js';
 import { encryptMessageForStorage } from './crypto-storage.js';
@@ -65,22 +66,31 @@ async function init() {
   if (state.keys && state.currentUsername) {
     api.ensureRegisteredWithServer().catch((e) => console.warn('Ensure registered:', e));
     migratePlainMessagesToEncrypted().catch((e) => console.warn('Message migration failed:', e));
+
+    const roomRedirect = sessionStorage.getItem('war-chat-room-redirect');
+    if (roomRedirect) {
+      sessionStorage.removeItem('war-chat-room-redirect');
+      window.location.hash = `#room/${roomRedirect}`;
+    }
   }
 
   setSetupCallbacks({ navigate, render, migratePlainMessagesToEncrypted });
   initSetup();
 
-  // Main: New chat / New group
+  // Main: New chat / New group / New meeting
   const btnNewChat = document.getElementById('btnNewChat');
   if (btnNewChat) btnNewChat.onclick = () => showNewChatModal();
   const btnNewGroup = document.getElementById('btnNewGroup');
   if (btnNewGroup) btnNewGroup.onclick = () => showNewGroupModal();
+  const btnNewMeeting = document.getElementById('btnNewMeeting');
+  if (btnNewMeeting) btnNewMeeting.onclick = () => showNewMeetingModal();
 
   // Header actions (war-chat-header component)
   document.addEventListener('war-chat-header-action', (e) => {
     const action = e.detail?.action;
     if (action === 'back') {
-      if (getRoute().view === 'video') {
+      const v = getRoute().view;
+      if (v === 'video' || v === 'room') {
         import('./hrt.js').then((m) => m.endVideoCall());
       } else {
         navigate('chats');
@@ -100,7 +110,8 @@ async function init() {
     else if (action === 'new-group') showNewGroupModal();
     else if (action === 'profile') navigate('profile');
     else if (action === 'logout') {
-      if (getRoute().view === 'video') {
+      const v = getRoute().view;
+      if (v === 'video' || v === 'room') {
         import('./hrt.js').then((m) => { m.endVideoCall(); doLogout(); });
       } else {
         doLogout();
