@@ -2,6 +2,9 @@
 
 import { showMenu } from './wc-menu.js';
 
+const SVG_BACK = `<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 5L7 10L12 15" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const SVG_MENU = `<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="4" r="1.5" fill="currentColor"/><circle cx="10" cy="10" r="1.5" fill="currentColor"/><circle cx="10" cy="16" r="1.5" fill="currentColor"/></svg>`;
+
 customElements.define('war-chat-header', class WarChatHeader extends HTMLElement {
   static get observedAttributes() {
     return ['title', 'show-back', 'show-video-chat', 'show-add-member', 'show-leave-group', 'show-new-chat', 'show-profile', 'show-logout'];
@@ -57,7 +60,7 @@ customElements.define('war-chat-header', class WarChatHeader extends HTMLElement
       backBtn.className = 'btn-icon';
       backBtn.setAttribute('data-action', 'back');
       backBtn.title = 'Back';
-      backBtn.textContent = '\u2190';
+      backBtn.innerHTML = SVG_BACK;
       backBtn.onclick = () => this.dispatchEvent(new CustomEvent('war-chat-header-action', { detail: { action: 'back' }, bubbles: true }));
       actions.appendChild(backBtn);
     }
@@ -66,7 +69,7 @@ customElements.define('war-chat-header', class WarChatHeader extends HTMLElement
       menuBtn.className = 'btn-icon btn-menu-toggle';
       menuBtn.id = 'headerMenuToggle';
       menuBtn.title = 'Menu';
-      menuBtn.textContent = '\u22EE';
+      menuBtn.innerHTML = SVG_MENU;
       menuBtn.onclick = (e) => {
         e.stopPropagation();
         showMenu(menuBtn, items, (action) => {

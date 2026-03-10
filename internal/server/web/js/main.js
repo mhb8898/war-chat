@@ -1,6 +1,7 @@
 // War Chat - entry point: init, bind setup/modals/send, hashchange, render
 
 import './components/index.js'; // register web components
+import { initTheme } from './theme.js';
 
 import { ensureCrypto } from './crypto.js';
 import { openDB } from './db.js';
@@ -253,6 +254,7 @@ async function init() {
   }
 
   render();
+  initTheme();
 }
 
 if (typeof document !== 'undefined') {

@@ -65,9 +65,17 @@ customElements.define('war-chat-message', class WarChatMessage extends HTMLEleme
     if (this.isConnected) this.render();
   }
 
+  _formatTs(ts) {
+    if (!ts) return '';
+    const d = new Date(typeof ts === 'number' ? ts : Number(ts));
+    if (isNaN(d)) return '';
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
   render() {
     const from = this.getAttribute('from') || '';
     const text = this.getAttribute('text') || '';
+    const ts = this.getAttribute('ts') || '';
     const kind = this.getAttribute('kind') || 'note'; // sent | received | note
     this.className = 'msg ' + kind;
     this.replaceChildren();
@@ -77,7 +85,8 @@ customElements.define('war-chat-message', class WarChatMessage extends HTMLEleme
     } else {
       const meta = document.createElement('span');
       meta.className = 'meta';
-      meta.textContent = from;
+      const timeStr = this._formatTs(ts);
+      meta.textContent = from + (timeStr ? ' · ' + timeStr : '');
       this.appendChild(meta);
       this.appendChild(document.createElement('br'));
       this.appendChild(bodyFragment);

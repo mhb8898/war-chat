@@ -31,6 +31,13 @@ customElements.define('war-chat-chat-list', class WarChatChatList extends HTMLEl
     this.render();
   }
 
+  _avatarColor(name) {
+    const palette = ['#7c6af6','#4f46e5','#0ea5e9','#10b981','#f59e0b','#ef4444','#ec4899','#8b5cf6'];
+    let h = 0;
+    for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+    return palette[h % palette.length];
+  }
+
   render() {
     const list = this._conversations || [];
     const selected = this._selectedPeer;
@@ -57,7 +64,14 @@ customElements.define('war-chat-chat-list', class WarChatChatList extends HTMLEl
       li.className = 'chat-row' + (c.peer === selected ? ' selected' : '');
       const avatar = document.createElement('div');
       avatar.className = 'chat-avatar';
-      avatar.textContent = isSelf ? '\u{1F4E6}' : (isGroup ? '\u{1F465}' : (c.peer[0] || '?').toUpperCase());
+      if (isSelf) {
+        avatar.textContent = '\u{1F4E6}';
+      } else if (isGroup) {
+        avatar.textContent = '\u{1F465}';
+      } else {
+        avatar.textContent = (c.peer[0] || '?').toUpperCase();
+        avatar.style.background = this._avatarColor(c.peer);
+      }
       const info = document.createElement('div');
       info.className = 'chat-info';
       const nameEl = document.createElement('div');
@@ -68,14 +82,16 @@ customElements.define('war-chat-chat-list', class WarChatChatList extends HTMLEl
       previewEl.textContent = c.lastMsg || 'No messages';
       info.appendChild(nameEl);
       info.appendChild(previewEl);
-      const timeEl = document.createElement('div');
-      timeEl.className = 'chat-time';
-      timeEl.textContent = formatTime(c.lastTs);
       li.appendChild(avatar);
       li.appendChild(info);
-      li.appendChild(timeEl);
       const rowPeer = c.peer;
       if (!isSelf) {
+        const metaCol = document.createElement('div');
+        metaCol.className = 'chat-row-meta';
+        const timeEl = document.createElement('div');
+        timeEl.className = 'chat-time';
+        timeEl.textContent = formatTime(c.lastTs);
+        metaCol.appendChild(timeEl);
         const menuBtn = document.createElement('button');
         menuBtn.type = 'button';
         menuBtn.className = 'chat-row-menu-btn btn-icon';
@@ -89,7 +105,13 @@ customElements.define('war-chat-chat-list', class WarChatChatList extends HTMLEl
             this.dispatchEvent(new CustomEvent('war-chat-chat-action', { detail: { peer: rowPeer, action }, bubbles: true }));
           });
         };
-        li.appendChild(menuBtn);
+        metaCol.appendChild(menuBtn);
+        li.appendChild(metaCol);
+      } else {
+        const timeEl = document.createElement('div');
+        timeEl.className = 'chat-time';
+        timeEl.textContent = formatTime(c.lastTs);
+        li.appendChild(timeEl);
       }
       li.onclick = (e) => {
         if (e.target.closest('.chat-row-menu-btn')) return;
