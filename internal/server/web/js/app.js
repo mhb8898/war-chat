@@ -141,7 +141,7 @@ export function showView(name, param) {
 
   if (name === 'main') {
     ws.connectWS();
-    let headerTitle = 'War Chat';
+    let headerTitle = 'Personal Chat';
     if (param) {
       if (param === state.currentUsername) headerTitle = 'Saved Messages';
       else if (groups.isGroupPeer(param)) {

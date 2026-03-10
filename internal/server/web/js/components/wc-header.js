@@ -45,7 +45,7 @@ customElements.define('war-chat-header', class WarChatHeader extends HTMLElement
   }
 
   render() {
-    const titleText = this.getAttribute('title') || 'War Chat';
+    const titleText = this.getAttribute('title') || 'Personal Chat';
     const showBack = this.hasAttribute('show-back');
     const items = this.buildMenuItems();
     this.replaceChildren();

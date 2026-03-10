@@ -38,9 +38,9 @@ export async function deriveKeyFromPrf(prfResult) {
 export async function createPasskey(username) {
   const rpId = getRpId();
   const userId = crypto.getRandomValues(new Uint8Array(16));
-  const displayName = (username && username.trim()) || 'War Chat user';
+  const displayName = (username && username.trim()) || 'Personal Chat user';
   const publicKeyBase = {
-    rp: { name: 'War Chat', id: rpId },
+    rp: { name: 'Personal Chat', id: rpId },
     user: { id: userId, name: displayName, displayName },
     pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
     authenticatorSelection: { residentKey: 'preferred', userVerification: 'required' },

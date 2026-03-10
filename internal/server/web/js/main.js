@@ -249,8 +249,8 @@ async function init() {
   const footer = document.getElementById('appFooter');
   if (footer) {
     fetch(`${API_BASE}/version`).then((r) => r.ok ? r.json() : {}).then((d) => {
-      footer.textContent = d.version ? `War Chat ${d.version}` : 'War Chat';
-    }).catch(() => { footer.textContent = 'War Chat'; });
+      footer.textContent = d.version ? `Personal Chat ${d.version}` : 'Personal Chat';
+    }).catch(() => { footer.textContent = 'Personal Chat'; });
   }
 
   render();

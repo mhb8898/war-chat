@@ -40,10 +40,10 @@ function playNotificationSound() {
 function maybeNotify(from, text) {
   if (typeof document !== 'undefined' && document.hidden && typeof Notification !== 'undefined') {
     if (Notification.permission === 'granted') {
-      new Notification('War Chat', { body: 'Message from ' + from });
+      new Notification('Personal Chat', { body: 'Message from ' + from });
     } else if (Notification.permission === 'default') {
       Notification.requestPermission().then((p) => {
-        if (p === 'granted') new Notification('War Chat', { body: 'Message from ' + from });
+        if (p === 'granted') new Notification('Personal Chat', { body: 'Message from ' + from });
       });
     }
     playNotificationSound();

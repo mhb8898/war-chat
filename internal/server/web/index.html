@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>War Chat</title>
+  <title>Personal Chat</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💬</text></svg>">
   <!-- FOUC prevention: apply saved/system theme before first paint -->
   <script>(function(){var t=localStorage.getItem('war-chat-theme')||(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');document.documentElement.setAttribute('data-theme',t)})();</script>
@@ -270,8 +270,11 @@
     .view-setup .btn-secondary { background: transparent; border: 1px solid var(--border); color: var(--text); }
     .view-setup .btn-secondary:hover { background: var(--surface-2); }
     .view-setup .setup-help { margin: 0 0 0.75rem; font-size: 0.8125rem; color: var(--text-2); }
+    .view-setup .setup-passkey-actions { margin-top: auto; display: flex; flex-direction: column; gap: 0.5rem; width: 100%; }
     .view-setup .setup-error { color: #f87171; font-size: 0.8125rem; margin: 0.5rem 0 0; }
-    .view-setup .setup-mnemonic-actions, .view-setup .setup-register-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+    .view-setup .setup-mnemonic-actions { display: flex; gap: 0.5rem; }
+    .view-setup .setup-mnemonic-actions button { flex: 1; min-width: 0; width: auto; padding-left: 0.5rem; padding-right: 0.5rem; }
+    .view-setup .setup-register-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
     .view-setup .setup-hint { color: var(--text-2); font-size: 0.875rem; margin: 0 0 0.5rem; }
     .setup-register-card {
       background: var(--surface-2);
@@ -735,7 +738,7 @@
         </div>
       </div>
     </main>
-    <footer class="app-footer" id="appFooter">War Chat</footer>
+    <footer class="app-footer" id="appFooter">Personal Chat</footer>
   </div>
 
   <war-chat-modal id="newChatModal">
