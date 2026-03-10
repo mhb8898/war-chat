@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 var ErrDuplicateUsername = errors.New("username already taken with a different key")
@@ -58,6 +60,12 @@ func safePathComponent(name string) bool {
 		!strings.Contains(name, "..")
 }
 
+// AdminCredentials holds the admin username and bcrypt password hash.
+type AdminCredentials struct {
+	Username string `json:"username"`
+	PassHash string `json:"passHash"`
+}
+
 type Store struct {
 	mu          sync.RWMutex
 	keysPath    string
@@ -65,10 +73,12 @@ type Store struct {
 	groupsDir   string
 	invitesPath string
 	roomsPath   string
+	adminPath   string
 	keys        map[string]string
 	invites     map[string]*InviteToken
 	rooms       map[string]*CallRoom
 	knocks      map[string]*GuestKnock
+	adminCreds  *AdminCredentials
 }
 
 func NewStore(dataDir string) (*Store, error) {
@@ -77,6 +87,7 @@ func NewStore(dataDir string) (*Store, error) {
 	groupsDir := filepath.Join(dataDir, "groups")
 	invitesPath := filepath.Join(dataDir, "invites.json")
 	roomsPath := filepath.Join(dataDir, "rooms.json")
+	adminPath := filepath.Join(dataDir, "admin.json")
 
 	if err := os.MkdirAll(offlineDir, 0755); err != nil {
 		return nil, err
@@ -91,6 +102,7 @@ func NewStore(dataDir string) (*Store, error) {
 		groupsDir:   groupsDir,
 		invitesPath: invitesPath,
 		roomsPath:   roomsPath,
+		adminPath:   adminPath,
 		keys:        make(map[string]string),
 		invites:     make(map[string]*InviteToken),
 		rooms:       make(map[string]*CallRoom),
@@ -104,6 +116,9 @@ func NewStore(dataDir string) (*Store, error) {
 		return nil, err
 	}
 	if err := s.loadRooms(); err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	if err := s.loadAdmin(); err != nil && !os.IsNotExist(err) {
 		return nil, err
 	}
 
@@ -632,6 +647,60 @@ func (s *Store) DenyKnock(knockID string) bool {
 		return true
 	}
 	return false
+}
+
+// --- Admin credential methods ---
+
+func (s *Store) loadAdmin() error {
+	data, err := os.ReadFile(s.adminPath)
+	if err != nil {
+		return err
+	}
+	var creds AdminCredentials
+	if err := json.Unmarshal(data, &creds); err != nil {
+		return err
+	}
+	s.adminCreds = &creds
+	return nil
+}
+
+// AdminConfigured returns true if an admin password has been set.
+func (s *Store) AdminConfigured() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.adminCreds != nil
+}
+
+// SetAdminCredentials hashes the password with bcrypt and persists the credentials.
+func (s *Store) SetAdminCredentials(username, password string) error {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.adminCreds = &AdminCredentials{
+		Username: username,
+		PassHash: string(hash),
+	}
+	data, err := json.MarshalIndent(s.adminCreds, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(s.adminPath, data, 0600)
+}
+
+// CheckAdminCredentials validates the given username/password against stored credentials.
+func (s *Store) CheckAdminCredentials(username, password string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.adminCreds == nil {
+		return false
+	}
+	if s.adminCreds.Username != username {
+		return false
+	}
+	return bcrypt.CompareHashAndPassword([]byte(s.adminCreds.PassHash), []byte(password)) == nil
 }
 
 // ResetGroups removes all group files.

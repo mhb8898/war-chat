@@ -32,8 +32,10 @@ func main() {
 		log.Fatal(err)
 	}
 
-	log.Printf("War Chat server listening on :%s", port)
-	log.Printf("Admin panel: http://localhost:%s/admin/%s", port, s.AdminToken())
+	log.Printf("Personal Chat server listening on :%s", port)
+	if !s.AdminConfigured() {
+		log.Printf("Admin not configured — visit http://localhost:%s/admin to set up", port)
+	}
 	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
 

@@ -1,9 +1,7 @@
 package server
 
 import (
-	"crypto/rand"
 	"embed"
-	"encoding/hex"
 	"io/fs"
 	"log"
 	"net/http"
@@ -18,7 +16,6 @@ type Server struct {
 	hub           *Hub
 	hrtHub        *HRTHub
 	version       string
-	adminToken    string
 	requireInvite bool
 }
 
@@ -37,27 +34,20 @@ func New(dataDir, version string) (*Server, error) {
 
 	hrtHub := NewHRTHub(store)
 
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		return nil, err
-	}
-	adminToken := hex.EncodeToString(b)
-
 	s := &Server{
 		store:         store,
 		hub:           hub,
 		hrtHub:        hrtHub,
 		version:       version,
-		adminToken:    adminToken,
 		requireInvite: os.Getenv("REQUIRE_INVITE") == "true",
 	}
 	s.setupRoutes()
 	return s, nil
 }
 
-// AdminToken returns the random token for the admin panel path. Used at startup to log the admin URL.
-func (s *Server) AdminToken() string {
-	return s.adminToken
+// AdminConfigured returns whether the admin password has been set up.
+func (s *Server) AdminConfigured() bool {
+	return s.store.AdminConfigured()
 }
 
 func (s *Server) handleStatic() http.Handler {

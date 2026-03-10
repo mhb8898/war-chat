@@ -7,26 +7,6 @@ import (
 	"strings"
 )
 
-// escapeJSString escapes s for safe use inside a JavaScript double-quoted string.
-func escapeJSString(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		switch r {
-		case '\\':
-			b.WriteString(`\\`)
-		case '"':
-			b.WriteString(`\"`)
-		case '\n':
-			b.WriteString(`\n`)
-		case '\r':
-			b.WriteString(`\r`)
-		default:
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}
-
 func (s *Server) setupRoutes() {
 	http.HandleFunc("/health", s.handleHealth)
 	http.HandleFunc("/version", s.handleVersion)
@@ -41,6 +21,7 @@ func (s *Server) setupRoutes() {
 	http.HandleFunc("/r/", s.handleRoomRedirect)
 	http.HandleFunc("/rooms", s.handleCreateRoom)
 	http.HandleFunc("/rooms/", s.handleRoomRoutes)
+	http.HandleFunc("/admin", s.handleAdmin)
 	http.HandleFunc("/admin/", s.handleAdmin)
 	http.Handle("/", s.handleStatic())
 }
@@ -214,30 +195,45 @@ func (s *Server) handleShareableLink(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/?u="+username+"#chat/"+username, http.StatusFound)
 }
 
-// handleAdmin serves the admin panel and handles reset actions. Path: /admin/<token> or /admin/<token>/<action>.
+// handleAdmin serves the admin panel with Basic Auth, or the setup page on first run.
 func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/admin")
 	path = strings.Trim(path, "/")
-	parts := strings.SplitN(path, "/", 2)
-	token := parts[0]
-	action := ""
-	if len(parts) > 1 {
-		action = parts[1]
-	}
-	if token != s.adminToken {
-		http.NotFound(w, r)
+
+	// First-run setup: no password configured yet.
+	if !s.store.AdminConfigured() {
+		if path == "setup" && r.Method == http.MethodPost {
+			s.handleAdminSetup(w, r)
+			return
+		}
+		// Show setup page for any /admin request when not configured.
+		if r.Method == http.MethodGet {
+			s.serveAdminSetupPage(w)
+			return
+		}
+		http.Error(w, "Admin not configured", http.StatusForbidden)
 		return
 	}
-	if action == "" {
+
+	// Require Basic Auth.
+	user, pass, ok := r.BasicAuth()
+	if !ok || !s.store.CheckAdminCredentials(user, pass) {
+		w.Header().Set("WWW-Authenticate", `Basic realm="War Chat Admin"`)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if path == "" || path == "setup" {
 		if r.Method != http.MethodGet {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		s.serveAdminPage(w, token)
+		s.serveAdminPage(w)
 		return
 	}
+
 	w.Header().Set("Content-Type", "application/json")
-	switch action {
+	switch path {
 	case "reset-users":
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -309,6 +305,34 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// handleAdminSetup processes the initial password setup form.
+func (s *Server) handleAdminSetup(w http.ResponseWriter, r *http.Request) {
+	if s.store.AdminConfigured() {
+		http.Redirect(w, r, "/admin", http.StatusFound)
+		return
+	}
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+	req.Username = strings.TrimSpace(req.Username)
+	req.Password = strings.TrimSpace(req.Password)
+	if req.Username == "" || len(req.Password) < 8 {
+		http.Error(w, "Username required and password must be at least 8 characters", http.StatusBadRequest)
+		return
+	}
+	if err := s.store.SetAdminCredentials(req.Username, req.Password); err != nil {
+		http.Error(w, "Failed to save credentials", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 func (s *Server) handleRoomRedirect(w http.ResponseWriter, r *http.Request) {
@@ -492,17 +516,82 @@ func (s *Server) handleRoomRoutes(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) serveAdminPage(w http.ResponseWriter, token string) {
+func (s *Server) serveAdminSetupPage(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	base := "/admin/" + token
-	baseEscaped := escapeJSString(base)
-	// HTML split at JS injection point to avoid backtick conflicts.
-	part1 := `<!DOCTYPE html>
+	const page = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>War Chat Admin</title>
+<title>War Chat Setup</title>
+<script>(function(){var t=localStorage.getItem('war-chat-theme')||(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');document.documentElement.setAttribute('data-theme',t)})();</script>
+<style>
+:root{--bg:#08080f;--surface:#10101c;--surface-2:#181828;--border:#23233a;--accent:#7c6af6;--accent-hover:#6659e3;--danger:#ef4444;--text:#f0f0fa;--text-2:#8b8bab;color-scheme:dark}
+html[data-theme=light]{--bg:#f4f4f8;--surface:#ffffff;--surface-2:#eaeaf3;--border:#d8d8ec;--text:#0d0d1a;--text-2:#626286;color-scheme:light}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex;align-items:center;justify-content:center}
+.setup-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:2rem;width:100%;max-width:400px;margin:1rem}
+.setup-card h1{font-size:1.25rem;font-weight:700;margin-bottom:0.25rem;letter-spacing:-0.01em}
+.setup-card p{font-size:0.8125rem;color:var(--text-2);margin-bottom:1.5rem}
+label{display:block;font-size:0.8125rem;font-weight:600;margin-bottom:0.375rem;color:var(--text-2)}
+input{width:100%;padding:0.625rem 0.875rem;border:1px solid var(--border);border-radius:10px;background:var(--surface-2);color:var(--text);font-size:0.9375rem;font-family:inherit;margin-bottom:1rem;outline:none;transition:border-color .15s}
+input:focus{border-color:var(--accent)}
+button{padding:0.625rem 1.125rem;border:none;border-radius:10px;background:var(--accent);color:#fff;font-size:0.9375rem;font-family:inherit;font-weight:600;cursor:pointer;transition:background .15s,transform .1s;width:100%}
+button:hover{background:var(--accent-hover)}
+button:active{transform:scale(.98)}
+button:disabled{opacity:.45;cursor:not-allowed;transform:none}
+#err{font-size:0.8125rem;color:var(--danger);margin-bottom:1rem;display:none}
+</style>
+</head>
+<body>
+<div class="setup-card">
+  <h1>Welcome to War Chat</h1>
+  <p>Create an admin account to get started.</p>
+  <form id="setupForm">
+    <label for="username">Username</label>
+    <input id="username" name="username" type="text" autocomplete="username" required value="admin">
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" autocomplete="new-password" required minlength="8" placeholder="Min 8 characters">
+    <label for="confirm">Confirm password</label>
+    <input id="confirm" name="confirm" type="password" autocomplete="new-password" required minlength="8">
+    <div id="err"></div>
+    <button type="submit">Create admin account</button>
+  </form>
+</div>
+<script>
+document.getElementById('setupForm').onsubmit=async function(e){
+  e.preventDefault();
+  var err=document.getElementById('err');
+  var user=document.getElementById('username').value.trim();
+  var pass=document.getElementById('password').value;
+  var conf=document.getElementById('confirm').value;
+  err.style.display='none';
+  if(pass!==conf){err.textContent='Passwords do not match';err.style.display='block';return;}
+  if(pass.length<8){err.textContent='Password must be at least 8 characters';err.style.display='block';return;}
+  var btn=this.querySelector('button');
+  btn.disabled=true;btn.textContent='Setting up…';
+  try{
+    var r=await fetch('/admin/setup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:user,password:pass})});
+    if(r.ok){window.location.href='/admin';}
+    else{var t=await r.text();err.textContent=t||'Setup failed';err.style.display='block';}
+  }catch(ex){err.textContent='Network error';err.style.display='block';}
+  btn.disabled=false;btn.textContent='Create admin account';
+};
+</script>
+</body>
+</html>`
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(page))
+}
+
+func (s *Server) serveAdminPage(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	const page = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Personal Chat Admin</title>
 <script src="/qrcode.min.js"></script>
 <script>(function(){var t=localStorage.getItem('war-chat-theme')||(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');document.documentElement.setAttribute('data-theme',t)})();</script>
 <style>
@@ -550,7 +639,7 @@ button:disabled{opacity:.45;cursor:not-allowed;transform:none}
         <rect x="3" y="9" width="14" height="10" rx="2" stroke="currentColor" stroke-width="1.5"/>
         <path d="M6.5 9V6a3.5 3.5 0 0 1 7 0v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
       </svg>
-      War Chat Admin
+      Personal Chat Admin
     </div>
     <button id="btnThemeToggle" class="btn-icon" title="Toggle theme"></button>
   </div>
@@ -590,8 +679,7 @@ button:disabled{opacity:.45;cursor:not-allowed;transform:none}
   </div>
 </main>
 <script>
-const base = "`
-	part2 := `";
+const base = "/admin";
 const SVG_SUN = '<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="9" cy="9" r="3.25" stroke="currentColor" stroke-width="1.5"/><path d="M9 1.5V3M9 15v1.5M1.5 9H3M15 9h1.5M3.4 3.4l1.06 1.06M13.54 13.54l1.06 1.06M3.4 14.6l1.06-1.06M13.54 4.46l1.06-1.06" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
 const SVG_MOON = '<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M15 11.5A7 7 0 0 1 6.5 3a7 7 0 1 0 8.5 8.5z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 function applyTheme(t){
@@ -619,7 +707,7 @@ document.querySelectorAll('button[data-action]').forEach(function(btn){
     try{
       const r=await fetch(base+'/'+action,{method:'POST'});
       const j=await r.json().catch(function(){return{};});
-      showMsg(r.ok?'✓ Done: '+(j.action||action):'Error: '+r.status,!r.ok);
+      showMsg(r.ok?'Done: '+(j.action||action):'Error: '+r.status,!r.ok);
     }catch(e){showMsg('Error: '+e.message,true);}
   };
 });
@@ -663,5 +751,5 @@ document.getElementById('btnResetInvites').onclick=async function(){
 </body>
 </html>`
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(part1 + baseEscaped + part2))
+	_, _ = w.Write([]byte(page))
 }
