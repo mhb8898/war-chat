@@ -113,6 +113,48 @@ export async function importPubkeyFromBase64(b64) {
   }
 }
 
+export async function deriveP256KeypairFromSeed(seedBytes) {
+  ensureCrypto();
+  if (seedBytes.length !== 32) throw new Error('Seed must be exactly 32 bytes');
+  // Correct PKCS8 / PrivateKeyInfo DER for P-256.
+  // Structure (lengths verified from inside out):
+  //   ECPrivateKey content : version(3) + privateKey-OCTET-STRING(34) = 37  → 0x25
+  //   ECPrivateKey total   : 2 + 37 = 39                                     → 0x27 for outer OCTET STRING
+  //   AlgorithmIdentifier  : OID id-ecPublicKey(9) + OID P-256(10) = 19     → 0x13
+  //   PrivateKeyInfo content: version(3) + AlgId(21) + OCTET-STRING(41) = 65 → 0x41
+  const pkcs8Header = new Uint8Array([
+    0x30, 0x41,                                     // SEQUENCE PrivateKeyInfo, len=65
+    0x02, 0x01, 0x00,                               // INTEGER version=0
+    0x30, 0x13,                                     // SEQUENCE AlgorithmIdentifier, len=19
+    0x06, 0x07,                                     // OID, len=7
+    0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01,      // id-ecPublicKey
+    0x06, 0x08,                                     // OID, len=8
+    0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07,// P-256
+    0x04, 0x27,                                     // OCTET STRING, len=39
+    0x30, 0x25,                                     // SEQUENCE ECPrivateKey, len=37
+    0x02, 0x01, 0x01,                               // INTEGER version=1
+    0x04, 0x20,                                     // OCTET STRING privateKey, len=32
+  ]);
+  const pkcs8 = new Uint8Array(pkcs8Header.length + 32);
+  pkcs8.set(pkcs8Header);
+  pkcs8.set(seedBytes, pkcs8Header.length);
+  let privateKey;
+  try {
+    privateKey = await crypto.subtle.importKey(
+      'pkcs8', pkcs8.buffer,
+      { name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits', 'deriveKey']
+    );
+  } catch (e) {
+    throw new Error('Key derivation failed for this phrase: ' + e.message);
+  }
+  const privateJwk = await crypto.subtle.exportKey('jwk', privateKey);
+  const publicJwk = { kty: 'EC', crv: 'P-256', x: privateJwk.x, y: privateJwk.y };
+  const publicKey = await crypto.subtle.importKey(
+    'jwk', publicJwk, { name: 'ECDH', namedCurve: 'P-256' }, true, []
+  );
+  return { privateKey, publicKey, privateJwk, publicJwk };
+}
+
 export async function exportPubkeyToBase64(pubKey) {
   const jwk = await crypto.subtle.exportKey('jwk', pubKey);
   return btoa(JSON.stringify(jwk));

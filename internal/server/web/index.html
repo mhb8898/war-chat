@@ -186,14 +186,11 @@
     .view.active { display: flex !important; }
     .view:not(.active) { display: none !important; }
     .view-setup, .view-profile { padding: 1.5rem; flex: 1; }
-    .view-setup .setup-intro { margin: 0 0 1rem; opacity: 0.9; }
-    .view-setup .setup-primary { display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 1.5rem; }
+    .view-setup .setup-cols { display: flex; gap: 1.5rem; align-items: flex-start; flex-wrap: wrap; margin-bottom: 1.5rem; }
+    .view-setup .setup-col { flex: 1; min-width: 200px; display: flex; flex-direction: column; gap: 0.5rem; }
+    .view-setup .setup-divider { display: flex; align-items: center; opacity: 0.6; padding-top: 2.5rem; }
     .view-setup .btn-primary { width: 100%; }
     .view-setup .btn-secondary { background: transparent; border: 1px solid #e94560; }
-    .view-setup .setup-fallback { margin-bottom: 0.5rem; }
-    .view-setup .btn-link { background: none; border: none; color: #8ab4f8; cursor: pointer; padding: 0.5rem 0; font-size: 0.9rem; text-decoration: underline; }
-    .view-setup .btn-link:hover { color: #a8c7fa; }
-    .view-setup .setup-mnemonic-box { margin-top: 0.5rem; padding: 1rem; border: 1px solid #0f3460; border-radius: 8px; }
     .view-setup .setup-help { margin: 0 0 0.75rem; font-size: 0.9rem; opacity: 0.85; }
     .view-setup .setup-error { color: #f87171; font-size: 0.875rem; margin: 0.5rem 0 0; }
     .view-setup .setup-mnemonic-actions, .view-setup .setup-register-actions { display: flex; gap: 0.5rem; margin-top: 0.75rem; }

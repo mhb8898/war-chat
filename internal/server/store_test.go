@@ -2,9 +2,12 @@ package server
 
 import (
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -342,6 +345,127 @@ func TestStore_UpdateGroupMembers_emptyRemovesGroup(t *testing.T) {
 	}
 	if g != nil {
 		t.Errorf("after UpdateGroupMembers empty: expected nil, got %+v", g)
+	}
+}
+
+func TestStore_CreateInviteToken(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	token, err := store.CreateInviteToken()
+	if err != nil {
+		t.Fatalf("CreateInviteToken: %v", err)
+	}
+	if token == "" {
+		t.Fatal("CreateInviteToken: empty token")
+	}
+
+	tokens := store.ListInviteTokens()
+	if len(tokens) != 1 {
+		t.Fatalf("ListInviteTokens: expected 1, got %d", len(tokens))
+	}
+	if tokens[0].Token != token {
+		t.Errorf("ListInviteTokens: token mismatch: got %q", tokens[0].Token)
+	}
+	if tokens[0].Used {
+		t.Error("ListInviteTokens: expected Used=false")
+	}
+}
+
+func TestStore_ValidateAndConsumeToken(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	token, err := store.CreateInviteToken()
+	if err != nil {
+		t.Fatalf("CreateInviteToken: %v", err)
+	}
+
+	if !store.ValidateAndConsumeToken(token) {
+		t.Fatal("ValidateAndConsumeToken: expected true for valid token")
+	}
+	if store.ValidateAndConsumeToken(token) {
+		t.Fatal("ValidateAndConsumeToken: expected false for already-used token")
+	}
+	if store.ValidateAndConsumeToken("nonexistent") {
+		t.Fatal("ValidateAndConsumeToken: expected false for unknown token")
+	}
+}
+
+func TestStore_ResetInvites(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	if _, err := store.CreateInviteToken(); err != nil {
+		t.Fatalf("CreateInviteToken: %v", err)
+	}
+	if _, err := store.CreateInviteToken(); err != nil {
+		t.Fatalf("CreateInviteToken: %v", err)
+	}
+
+	if err := store.ResetInvites(); err != nil {
+		t.Fatalf("ResetInvites: %v", err)
+	}
+	if tokens := store.ListInviteTokens(); len(tokens) != 0 {
+		t.Errorf("after ResetInvites: expected 0 tokens, got %d", len(tokens))
+	}
+}
+
+func TestRegister_InviteRequired(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	s := &Server{store: store, requireInvite: true}
+
+	// Register without token → 403
+	body := `{"username":"alice","pubkey":"pk-alice"}`
+	req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.handleRegister(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("no token: expected 403, got %d", w.Code)
+	}
+
+	// Create a token, register with it → 200
+	token, err := store.CreateInviteToken()
+	if err != nil {
+		t.Fatalf("CreateInviteToken: %v", err)
+	}
+	body = `{"username":"alice","pubkey":"pk-alice","invite_token":"` + token + `"}`
+	req = httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	s.handleRegister(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("valid token: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Same token for a different user → 403 (token consumed)
+	body = `{"username":"bob","pubkey":"pk-bob","invite_token":"` + token + `"}`
+	req = httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	s.handleRegister(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("reused token: expected 403, got %d", w.Code)
+	}
+
+	// Re-register same key (no token) → 200 (idempotent)
+	body = `{"username":"alice","pubkey":"pk-alice"}`
+	req = httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	s.handleRegister(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("re-register same key: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

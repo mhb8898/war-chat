@@ -36,12 +36,22 @@ async function init() {
   ensureCrypto();
   await openDB();
 
+  const config = await api.fetchConfig();
+  if (config) state.requireInvite = config.requireInvite === true;
+
   const params = new URLSearchParams(window.location.search);
   const to = params.get('to') || params.get('u');
   if (to) {
     sessionStorage.setItem('war-chat-redirect', to);
     params.delete('to');
     params.delete('u');
+  }
+  const invite = params.get('invite');
+  if (invite) {
+    sessionStorage.setItem('war-chat-invite', invite);
+    params.delete('invite');
+  }
+  if (to || invite) {
     const cleanSearch = params.toString() ? '?' + params.toString() : '';
     history.replaceState(null, '', window.location.pathname + cleanSearch + (window.location.hash || ''));
   }

@@ -24,7 +24,7 @@ export function resetSetupView() {
   const usernameInput = document.getElementById('username');
   const mnemonicInput = document.getElementById('mnemonic');
   const mnemonicError = document.getElementById('setup-mnemonic-error');
-  if (setupMnemonic) setupMnemonic.classList.add('hidden');
+  if (setupMnemonic) setupMnemonic.classList.remove('hidden');
   if (setupPasskeyDiv) setupPasskeyDiv.classList.remove('hidden');
   if (setupRegister) setupRegister.classList.add('hidden');
   if (setupRegisterPasskeyHint) setupRegisterPasskeyHint.classList.add('hidden');
@@ -54,6 +54,16 @@ function validateMnemonic(mnemonic) {
 }
 
 export function initSetup() {
+  const storedInvite = sessionStorage.getItem('war-chat-invite');
+  if (storedInvite) {
+    sessionStorage.removeItem('war-chat-invite');
+    document.getElementById('setup-invite-div')?.classList.remove('hidden');
+    const inviteEl = document.getElementById('inviteToken');
+    if (inviteEl) inviteEl.value = storedInvite;
+  } else if (state.requireInvite) {
+    document.getElementById('setup-invite-div')?.classList.remove('hidden');
+  }
+
   const btnToggleMnemonic = document.getElementById('btnToggleMnemonic');
   if (btnToggleMnemonic) {
     btnToggleMnemonic.onclick = () => {
@@ -87,10 +97,19 @@ export function initSetup() {
       state.keys = { privateKey: kp.privateKey, publicKey: kp.publicKey };
       state.pendingPasskeyCredentialId = credentialId;
       const pubkey = await (await import('./crypto.js')).exportPubkeyToBase64(state.keys.publicKey);
+      const regBody = { username, pubkey };
+      if (state.requireInvite) {
+        const inviteToken = document.getElementById('inviteToken')?.value.trim() || '';
+        if (!inviteToken) {
+          alert('Enter your invite token');
+          return;
+        }
+        regBody.invite_token = inviteToken;
+      }
       const regResp = await fetch(`${API_BASE}/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, pubkey }),
+        body: JSON.stringify(regBody),
       });
       if (!regResp.ok) {
         const msg = await regResp.text();
@@ -187,7 +206,6 @@ export function initSetup() {
       document.getElementById('setup-register')?.classList.remove('hidden');
       document.getElementById('setup-register-passkey-hint')?.classList.add('hidden');
       document.getElementById('btnRegister')?.classList.remove('hidden');
-      document.getElementById('btnCreatePasskey')?.classList.remove('hidden');
     }
   };
 
@@ -197,10 +215,16 @@ export function initSetup() {
     const username = (usernameInput && usernameInput.value.trim().toLowerCase()) || '';
     if (!username) return alert('Choose a username');
     const pubkey = await (await import('./crypto.js')).exportPubkeyToBase64(state.keys.publicKey);
+    const body = { username, pubkey };
+    if (state.requireInvite) {
+      const token = document.getElementById('inviteToken')?.value.trim() || '';
+      if (!token) return alert('Enter your invite token');
+      body.invite_token = token;
+    }
     const resp = await fetch(`${API_BASE}/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, pubkey }),
+      body: JSON.stringify(body),
     });
     if (!resp.ok) {
       const msg = await resp.text();

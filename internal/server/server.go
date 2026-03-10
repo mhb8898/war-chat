@@ -7,17 +7,19 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
 )
 
 //go:embed web
 var webFS embed.FS
 
 type Server struct {
-	store      *Store
-	hub        *Hub
-	hrtHub     *HRTHub
-	version    string
-	adminToken string
+	store         *Store
+	hub           *Hub
+	hrtHub        *HRTHub
+	version       string
+	adminToken    string
+	requireInvite bool
 }
 
 func New(dataDir, version string) (*Server, error) {
@@ -40,7 +42,14 @@ func New(dataDir, version string) (*Server, error) {
 	}
 	adminToken := hex.EncodeToString(b)
 
-	s := &Server{store: store, hub: hub, hrtHub: hrtHub, version: version, adminToken: adminToken}
+	s := &Server{
+		store:         store,
+		hub:           hub,
+		hrtHub:        hrtHub,
+		version:       version,
+		adminToken:    adminToken,
+		requireInvite: os.Getenv("REQUIRE_INVITE") == "true",
+	}
 	s.setupRoutes()
 	return s, nil
 }

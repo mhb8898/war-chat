@@ -21,6 +21,13 @@ export async function getRecipientPubkey(username) {
   return json.pubkey;
 }
 
+export async function fetchConfig() {
+  try {
+    const resp = await fetch(`${API_BASE}/config`);
+    return resp.ok ? resp.json() : null;
+  } catch { return null; }
+}
+
 export async function ensureRegisteredWithServer() {
   const currentUsername = state.currentUsername;
   const keys = state.keys;

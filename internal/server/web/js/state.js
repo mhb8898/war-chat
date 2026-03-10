@@ -18,6 +18,7 @@ export const state = {
   currentRecipient: null,
   pubkeyCache: {},
   pendingPasskeyCredentialId: null,
+  requireInvite: false,
 };
 
 export function getState() {

@@ -1,6 +1,8 @@
 package server
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
@@ -11,6 +13,13 @@ import (
 )
 
 var ErrDuplicateUsername = errors.New("username already taken with a different key")
+
+// InviteToken is a single-use registration token.
+type InviteToken struct {
+	Token     string `json:"token"`
+	Used      bool   `json:"used"`
+	CreatedAt int64  `json:"createdAt"`
+}
 
 // Group holds group metadata (no keys).
 type Group struct {
@@ -32,17 +41,20 @@ func safePathComponent(name string) bool {
 }
 
 type Store struct {
-	mu         sync.RWMutex
-	keysPath   string
-	offlineDir string
-	groupsDir  string
-	keys       map[string]string
+	mu          sync.RWMutex
+	keysPath    string
+	offlineDir  string
+	groupsDir   string
+	invitesPath string
+	keys        map[string]string
+	invites     map[string]*InviteToken
 }
 
 func NewStore(dataDir string) (*Store, error) {
 	keysPath := filepath.Join(dataDir, "keys.json")
 	offlineDir := filepath.Join(dataDir, "offline")
 	groupsDir := filepath.Join(dataDir, "groups")
+	invitesPath := filepath.Join(dataDir, "invites.json")
 
 	if err := os.MkdirAll(offlineDir, 0755); err != nil {
 		return nil, err
@@ -52,13 +64,18 @@ func NewStore(dataDir string) (*Store, error) {
 	}
 
 	s := &Store{
-		keysPath:   keysPath,
-		offlineDir: offlineDir,
-		groupsDir:  groupsDir,
-		keys:       make(map[string]string),
+		keysPath:    keysPath,
+		offlineDir:  offlineDir,
+		groupsDir:   groupsDir,
+		invitesPath: invitesPath,
+		keys:        make(map[string]string),
+		invites:     make(map[string]*InviteToken),
 	}
 
 	if err := s.loadKeys(); err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	if err := s.loadInvites(); err != nil && !os.IsNotExist(err) {
 		return nil, err
 	}
 
@@ -253,6 +270,72 @@ func (s *Store) DeleteGroup(id string) error {
 	defer s.mu.Unlock()
 	path := filepath.Join(s.groupsDir, safeID+".json")
 	return os.Remove(path)
+}
+
+func (s *Store) loadInvites() error {
+	data, err := os.ReadFile(s.invitesPath)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(data, &s.invites)
+}
+
+func (s *Store) saveInvites() error {
+	data, err := json.MarshalIndent(s.invites, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(s.invitesPath, data, 0600)
+}
+
+// CreateInviteToken generates a random single-use invite token and persists it.
+func (s *Store) CreateInviteToken() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	token := hex.EncodeToString(b)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.invites[token] = &InviteToken{
+		Token:     token,
+		Used:      false,
+		CreatedAt: time.Now().UnixMilli(),
+	}
+	return token, s.saveInvites()
+}
+
+// ValidateAndConsumeToken marks a token used and returns true, or returns false if invalid/used.
+func (s *Store) ValidateAndConsumeToken(token string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	inv, ok := s.invites[token]
+	if !ok || inv.Used {
+		return false
+	}
+	inv.Used = true
+	_ = s.saveInvites()
+	return true
+}
+
+// ListInviteTokens returns a snapshot of all invite tokens.
+func (s *Store) ListInviteTokens() []*InviteToken {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]*InviteToken, 0, len(s.invites))
+	for _, inv := range s.invites {
+		cp := *inv
+		out = append(out, &cp)
+	}
+	return out
+}
+
+// ResetInvites clears all invite tokens.
+func (s *Store) ResetInvites() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.invites = make(map[string]*InviteToken)
+	return s.saveInvites()
 }
 
 func (s *Store) QueueOffline(recipient, msgID, from, payload, nonce string, ts int64) error {

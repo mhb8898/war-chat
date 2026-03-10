@@ -11,6 +11,7 @@ import * as db from './db.js';
 import {
   mnemonicToSeed,
   generateKeypair,
+  deriveP256KeypairFromSeed,
   exportPubkeyToBase64,
 } from './crypto.js';
 import * as passkey from './passkey.js';
@@ -77,10 +78,8 @@ export async function deriveKeypair(mnemonic) {
     return { privateKey, publicKey, seedKey };
   }
 
-  const kp = await generateKeypair();
-  const privateJwk = await crypto.subtle.exportKey('jwk', kp.privateKey);
-  const publicJwk = await crypto.subtle.exportKey('jwk', kp.publicKey);
-  await db.putKeypair({ seed: seedKey, privateJwk, publicJwk });
+  const kp = await deriveP256KeypairFromSeed(seed);
+  await db.putKeypair({ seed: seedKey, privateJwk: kp.privateJwk, publicJwk: kp.publicJwk });
   return { privateKey: kp.privateKey, publicKey: kp.publicKey, seedKey };
 }
 

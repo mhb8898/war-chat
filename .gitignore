@@ -1,3 +1,6 @@
+# Internal docs (not for repo)
+.internal/
+
 # Data (runtime: keys, offline messages)
 data/
 

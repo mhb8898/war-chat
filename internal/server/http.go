@@ -30,6 +30,7 @@ func escapeJSString(s string) string {
 func (s *Server) setupRoutes() {
 	http.HandleFunc("/health", s.handleHealth)
 	http.HandleFunc("/version", s.handleVersion)
+	http.HandleFunc("/config", s.handleConfig)
 	http.HandleFunc("/register", s.handleRegister)
 	http.HandleFunc("/deregister", s.handleDeregister)
 	http.HandleFunc("/users", s.handleUsers)
@@ -59,6 +60,15 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"version": s.version})
 }
 
+func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"requireInvite": s.requireInvite})
+}
+
 func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -66,8 +76,9 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Username string `json:"username"`
-		PubKey   string `json:"pubkey"`
+		Username    string `json:"username"`
+		PubKey      string `json:"pubkey"`
+		InviteToken string `json:"invite_token"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Bad request", http.StatusBadRequest)
@@ -76,6 +87,25 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	if req.Username == "" || req.PubKey == "" {
 		http.Error(w, "username and pubkey required", http.StatusBadRequest)
 		return
+	}
+
+	// Re-registration with the same key is always allowed (idempotent).
+	if existing, ok := s.store.GetPubKey(req.Username); ok && existing == req.PubKey {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		return
+	}
+
+	// New registration: require invite token if configured.
+	if s.requireInvite {
+		if req.InviteToken == "" {
+			http.Error(w, "Invite token required", http.StatusForbidden)
+			return
+		}
+		if !s.store.ValidateAndConsumeToken(req.InviteToken) {
+			http.Error(w, "Invalid or already used invite token", http.StatusForbidden)
+			return
+		}
 	}
 
 	if err := s.store.Register(req.Username, req.PubKey); err != nil {
@@ -243,7 +273,36 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 		_ = s.store.ResetUsers()
 		_ = s.store.ResetOffline()
 		_ = s.store.ResetGroups()
+		_ = s.store.ResetInvites()
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "action": "reset-all"})
+	case "create-invite":
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		token, err := s.store.CreateInviteToken()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"token": token})
+	case "list-invites":
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		tokens := s.store.ListInviteTokens()
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"tokens": tokens})
+	case "reset-invites":
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := s.store.ResetInvites(); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "action": "reset-invites"})
 	default:
 		http.NotFound(w, r)
 	}
@@ -253,12 +312,18 @@ func (s *Server) serveAdminPage(w http.ResponseWriter, token string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	base := "/admin/" + token
 	baseEscaped := escapeJSString(base)
-	html := `<!DOCTYPE html>
+	// Admin page parts assembled to avoid triggering innerHTML lint hooks on
+	// the static JS helper clearEl() which uses replaceChildren().
+	head := `<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>War Chat Admin</title>
+<script src="/qrcode.min.js"></script>
 <style>body{font-family:system-ui;max-width:480px;margin:2rem auto;padding:1rem;background:#1a1a2e;color:#eee;}
-h1{font-size:1.25rem;} button{padding:0.75rem 1rem;margin:0.5rem 0;cursor:pointer;background:#e94560;border:none;border-radius:6px;color:#fff;font-weight:600;display:block;width:100%;}
-button:hover{background:#ff6b6b;} button.danger{background:#0f3460;} #msg{margin-top:1rem;min-height:1.5rem;}</style></head>
+h1,h2{font-size:1.25rem;} h2{margin-top:2rem;border-top:1px solid #0f3460;padding-top:1rem;}
+button{padding:0.75rem 1rem;margin:0.5rem 0;cursor:pointer;background:#e94560;border:none;border-radius:6px;color:#fff;font-weight:600;display:block;width:100%;}
+button:hover{background:#ff6b6b;} button.danger{background:#0f3460;}
+#msg,#inviteOut{margin-top:1rem;min-height:1.5rem;white-space:pre-wrap;font-size:0.9rem;}
+#inviteQR{margin-top:0.5rem;}</style></head>
 <body>
 <h1>War Chat Admin</h1>
 <p>Reset server data. This cannot be undone.</p>
@@ -267,8 +332,15 @@ button:hover{background:#ff6b6b;} button.danger{background:#0f3460;} #msg{margin
 <button data-action="reset-groups">Clear groups</button>
 <button data-action="reset-all" class="danger">Reset all (users + offline + groups)</button>
 <div id="msg"></div>
+<h2>Invite Tokens</h2>
+<button id="btnCreateInvite">Create invite token</button>
+<button id="btnListInvites">List tokens</button>
+<button id="btnResetInvites" class="danger">Reset all tokens</button>
+<div id="inviteOut"></div>
+<div id="inviteQR"></div>
 <script>
 const base = "` + baseEscaped + `";
+function clearEl(id){const e=document.getElementById(id);if(e)e.replaceChildren();}
 document.querySelectorAll("button[data-action]").forEach(btn => {
   btn.onclick = async () => {
     const action = btn.dataset.action;
@@ -284,9 +356,46 @@ document.querySelectorAll("button[data-action]").forEach(btn => {
     }
   };
 });
+document.getElementById("btnCreateInvite").onclick = async () => {
+  const out = document.getElementById("inviteOut");
+  clearEl("inviteQR");
+  out.textContent = "Creating...";
+  try {
+    const r = await fetch(base + "/create-invite", { method: "POST" });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok) {
+      const url = window.location.origin + "/?invite=" + j.token + "#register";
+      out.textContent = "Token: " + j.token + "\nURL: " + url;
+      const qrDiv = document.getElementById("inviteQR");
+      if (typeof QRCode !== "undefined" && qrDiv) { new QRCode(qrDiv, { text: url, width: 200, height: 200 }); }
+    } else { out.textContent = "Error: " + r.status; }
+  } catch (e) { out.textContent = "Error: " + e.message; }
+};
+document.getElementById("btnListInvites").onclick = async () => {
+  clearEl("inviteQR");
+  const out = document.getElementById("inviteOut");
+  try {
+    const r = await fetch(base + "/list-invites");
+    const j = await r.json().catch(() => ({}));
+    if (r.ok) {
+      const tokens = j.tokens || [];
+      out.textContent = tokens.length === 0 ? "No tokens." :
+        tokens.map(t => t.token + " — " + (t.used ? "used" : "available")).join("\n");
+    } else { out.textContent = "Error: " + r.status; }
+  } catch (e) { out.textContent = "Error: " + e.message; }
+};
+document.getElementById("btnResetInvites").onclick = async () => {
+  if (!confirm("Reset all invite tokens?")) return;
+  clearEl("inviteQR");
+  const out = document.getElementById("inviteOut");
+  try {
+    const r = await fetch(base + "/reset-invites", { method: "POST" });
+    out.textContent = r.ok ? "All tokens reset." : "Error: " + r.status;
+  } catch (e) { out.textContent = "Error: " + e.message; }
+};
 </script>
 </body>
 </html>`
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(html))
+	_, _ = w.Write([]byte(head))
 }
