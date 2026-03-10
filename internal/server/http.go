@@ -632,8 +632,7 @@ document.getElementById('btnCreateInvite').onclick=async function(){
     const j=await r.json().catch(function(){return{};});
     if(r.ok){
       const url=window.location.origin+'/?invite='+j.token+'#register';
-      out.textContent='Token: '+j.token+'
-URL: '+url;
+      out.textContent='Token: '+j.token+'\nURL: '+url;
       const qrDiv=document.getElementById('inviteQR');
       if(typeof QRCode!=='undefined'&&qrDiv){new QRCode(qrDiv,{text:url,width:180,height:180});}
     }else{out.textContent='Error: '+r.status;}
@@ -647,8 +646,7 @@ document.getElementById('btnListInvites').onclick=async function(){
     const j=await r.json().catch(function(){return{};});
     if(r.ok){
       const tokens=j.tokens||[];
-      out.textContent=tokens.length===0?'No tokens.':tokens.map(function(t){return t.token+' — '+(t.used?'used':'available');}).join('
-');
+      out.textContent=tokens.length===0?'No tokens.':tokens.map(function(t){return t.token+' — '+(t.used?'used':'available');}).join('\n');
     }else{out.textContent='Error: '+r.status;}
   }catch(e){out.textContent='Error: '+e.message;}
 };
