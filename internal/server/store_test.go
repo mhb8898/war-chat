@@ -348,124 +348,221 @@ func TestStore_UpdateGroupMembers_emptyRemovesGroup(t *testing.T) {
 	}
 }
 
-func TestStore_CreateInviteToken(t *testing.T) {
+func TestStore_RegistrationRequests(t *testing.T) {
 	store, err := NewStore(t.TempDir())
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
 
-	token, err := store.CreateInviteToken()
+	// Create a request
+	req, err := store.CreateRegistrationRequest("alice", "pk-alice", "Hello, I'm Alice")
 	if err != nil {
-		t.Fatalf("CreateInviteToken: %v", err)
+		t.Fatalf("CreateRegistrationRequest: %v", err)
 	}
-	if token == "" {
-		t.Fatal("CreateInviteToken: empty token")
+	if req.Status != "pending" {
+		t.Errorf("expected pending, got %q", req.Status)
 	}
 
-	tokens := store.ListInviteTokens()
-	if len(tokens) != 1 {
-		t.Fatalf("ListInviteTokens: expected 1, got %d", len(tokens))
+	// List pending
+	pending := store.ListPendingRequests()
+	if len(pending) != 1 {
+		t.Fatalf("ListPendingRequests: expected 1, got %d", len(pending))
 	}
-	if tokens[0].Token != token {
-		t.Errorf("ListInviteTokens: token mismatch: got %q", tokens[0].Token)
+	if pending[0].Username != "alice" || pending[0].Intro != "Hello, I'm Alice" {
+		t.Errorf("unexpected request: %+v", pending[0])
 	}
-	if tokens[0].Used {
-		t.Error("ListInviteTokens: expected Used=false")
+
+	// Duplicate request with same key returns existing
+	req2, err := store.CreateRegistrationRequest("alice", "pk-alice", "different intro")
+	if err != nil {
+		t.Fatalf("CreateRegistrationRequest duplicate: %v", err)
+	}
+	if req2.Intro != "Hello, I'm Alice" {
+		t.Errorf("expected original intro, got %q", req2.Intro)
+	}
+
+	// Duplicate request with different key → error
+	_, err = store.CreateRegistrationRequest("alice", "pk-other", "hi")
+	if err == nil {
+		t.Fatal("expected error for different key on pending username")
 	}
 }
 
-func TestStore_ValidateAndConsumeToken(t *testing.T) {
+func TestStore_ApproveRequest(t *testing.T) {
 	store, err := NewStore(t.TempDir())
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
 
-	token, err := store.CreateInviteToken()
-	if err != nil {
-		t.Fatalf("CreateInviteToken: %v", err)
+	if _, err := store.CreateRegistrationRequest("alice", "pk-alice", "hi"); err != nil {
+		t.Fatalf("CreateRegistrationRequest: %v", err)
 	}
 
-	if !store.ValidateAndConsumeToken(token) {
-		t.Fatal("ValidateAndConsumeToken: expected true for valid token")
+	if err := store.ApproveRequest("alice"); err != nil {
+		t.Fatalf("ApproveRequest: %v", err)
 	}
-	if store.ValidateAndConsumeToken(token) {
-		t.Fatal("ValidateAndConsumeToken: expected false for already-used token")
+
+	// User should now be in keys
+	pk, ok := store.GetPubKey("alice")
+	if !ok || pk != "pk-alice" {
+		t.Errorf("after approve: expected pk-alice, got %q ok=%v", pk, ok)
 	}
-	if store.ValidateAndConsumeToken("nonexistent") {
-		t.Fatal("ValidateAndConsumeToken: expected false for unknown token")
+
+	// Request should be approved
+	req := store.GetRegistrationRequest("alice")
+	if req == nil || req.Status != "approved" {
+		t.Errorf("expected approved status, got %+v", req)
 	}
 }
 
-func TestStore_ResetInvites(t *testing.T) {
+func TestStore_DenyRequest(t *testing.T) {
 	store, err := NewStore(t.TempDir())
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
 
-	if _, err := store.CreateInviteToken(); err != nil {
-		t.Fatalf("CreateInviteToken: %v", err)
-	}
-	if _, err := store.CreateInviteToken(); err != nil {
-		t.Fatalf("CreateInviteToken: %v", err)
+	if _, err := store.CreateRegistrationRequest("bob", "pk-bob", "hi"); err != nil {
+		t.Fatalf("CreateRegistrationRequest: %v", err)
 	}
 
-	if err := store.ResetInvites(); err != nil {
-		t.Fatalf("ResetInvites: %v", err)
+	if err := store.DenyRequest("bob"); err != nil {
+		t.Fatalf("DenyRequest: %v", err)
 	}
-	if tokens := store.ListInviteTokens(); len(tokens) != 0 {
-		t.Errorf("after ResetInvites: expected 0 tokens, got %d", len(tokens))
+
+	req := store.GetRegistrationRequest("bob")
+	if req == nil || req.Status != "denied" {
+		t.Errorf("expected denied status, got %+v", req)
+	}
+
+	// User should NOT be in keys
+	if _, ok := store.GetPubKey("bob"); ok {
+		t.Error("denied user should not be in keys")
+	}
+
+	// Re-request after denial should work
+	req2, err := store.CreateRegistrationRequest("bob", "pk-bob", "please reconsider")
+	if err != nil {
+		t.Fatalf("re-request after denial: %v", err)
+	}
+	if req2.Status != "pending" || req2.Intro != "please reconsider" {
+		t.Errorf("re-request: expected pending with new intro, got %+v", req2)
 	}
 }
 
-func TestRegister_InviteRequired(t *testing.T) {
+func TestStore_ResetRequests(t *testing.T) {
 	store, err := NewStore(t.TempDir())
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	s := &Server{store: store, requireInvite: true}
 
-	// Register without token → 403
-	body := `{"username":"alice","pubkey":"pk-alice"}`
+	if _, err := store.CreateRegistrationRequest("alice", "pk-alice", "hi"); err != nil {
+		t.Fatalf("CreateRegistrationRequest: %v", err)
+	}
+	if _, err := store.CreateRegistrationRequest("bob", "pk-bob", "hi"); err != nil {
+		t.Fatalf("CreateRegistrationRequest: %v", err)
+	}
+
+	if err := store.ResetRequests(); err != nil {
+		t.Fatalf("ResetRequests: %v", err)
+	}
+	if pending := store.ListPendingRequests(); len(pending) != 0 {
+		t.Errorf("after ResetRequests: expected 0, got %d", len(pending))
+	}
+}
+
+func TestRegister_ApprovalRequired(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	s := &Server{store: store, requireApproval: true}
+
+	// Register → 202 pending
+	body := `{"username":"alice","pubkey":"pk-alice","intro":"Hi there"}`
 	req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	s.handleRegister(w, req)
-	if w.Code != http.StatusForbidden {
-		t.Errorf("no token: expected 403, got %d", w.Code)
+	if w.Code != http.StatusAccepted {
+		t.Errorf("first register: expected 202, got %d: %s", w.Code, w.Body.String())
 	}
 
-	// Create a token, register with it → 200
-	token, err := store.CreateInviteToken()
-	if err != nil {
-		t.Fatalf("CreateInviteToken: %v", err)
-	}
-	body = `{"username":"alice","pubkey":"pk-alice","invite_token":"` + token + `"}`
+	// Poll again → still 202
+	body = `{"username":"alice","pubkey":"pk-alice"}`
 	req = httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w = httptest.NewRecorder()
 	s.handleRegister(w, req)
-	if w.Code != http.StatusOK {
-		t.Errorf("valid token: expected 200, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusAccepted {
+		t.Errorf("poll pending: expected 202, got %d: %s", w.Code, w.Body.String())
 	}
 
-	// Same token for a different user → 403 (token consumed)
-	body = `{"username":"bob","pubkey":"pk-bob","invite_token":"` + token + `"}`
-	req = httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	w = httptest.NewRecorder()
-	s.handleRegister(w, req)
-	if w.Code != http.StatusForbidden {
-		t.Errorf("reused token: expected 403, got %d", w.Code)
+	// Admin approves
+	if err := store.ApproveRequest("alice"); err != nil {
+		t.Fatalf("ApproveRequest: %v", err)
 	}
 
-	// Re-register same key (no token) → 200 (idempotent)
+	// Poll again → 200 (re-registration shortcut)
 	body = `{"username":"alice","pubkey":"pk-alice"}`
 	req = httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w = httptest.NewRecorder()
 	s.handleRegister(w, req)
 	if w.Code != http.StatusOK {
-		t.Errorf("re-register same key: expected 200, got %d: %s", w.Code, w.Body.String())
+		t.Errorf("after approve: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Different user, same username → 409
+	body = `{"username":"alice","pubkey":"pk-other","intro":"I want alice"}`
+	req = httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	s.handleRegister(w, req)
+	if w.Code != http.StatusConflict {
+		t.Errorf("different key same username: expected 409, got %d", w.Code)
+	}
+}
+
+func TestRegister_DeniedThenReRequest(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	s := &Server{store: store, requireApproval: true}
+
+	// Register → 202
+	body := `{"username":"bob","pubkey":"pk-bob","intro":"First try"}`
+	req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.handleRegister(w, req)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("first register: expected 202, got %d", w.Code)
+	}
+
+	// Admin denies
+	if err := store.DenyRequest("bob"); err != nil {
+		t.Fatalf("DenyRequest: %v", err)
+	}
+
+	// Poll without intro → 403
+	body = `{"username":"bob","pubkey":"pk-bob"}`
+	req = httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	s.handleRegister(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("denied poll: expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Re-request with new intro → 202
+	body = `{"username":"bob","pubkey":"pk-bob","intro":"Please reconsider"}`
+	req = httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	s.handleRegister(w, req)
+	if w.Code != http.StatusAccepted {
+		t.Errorf("re-request: expected 202, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

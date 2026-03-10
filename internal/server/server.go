@@ -12,11 +12,11 @@ import (
 var webFS embed.FS
 
 type Server struct {
-	store         *Store
-	hub           *Hub
-	hrtHub        *HRTHub
-	version       string
-	requireInvite bool
+	store           *Store
+	hub             *Hub
+	hrtHub          *HRTHub
+	version         string
+	requireApproval bool
 }
 
 func New(dataDir, version string) (*Server, error) {
@@ -39,7 +39,7 @@ func New(dataDir, version string) (*Server, error) {
 		hub:           hub,
 		hrtHub:        hrtHub,
 		version:       version,
-		requireInvite: os.Getenv("REQUIRE_INVITE") == "true",
+		requireApproval: os.Getenv("REQUIRE_APPROVAL") == "true" || os.Getenv("REQUIRE_INVITE") == "true",
 	}
 	s.setupRoutes()
 	return s, nil

@@ -34,10 +34,12 @@ type GuestKnock struct {
 	Denied      bool
 }
 
-// InviteToken is a single-use registration token.
-type InviteToken struct {
-	Token     string `json:"token"`
-	Used      bool   `json:"used"`
+// RegistrationRequest is a pending/processed registration request.
+type RegistrationRequest struct {
+	Username  string `json:"username"`
+	PubKey    string `json:"pubkey"`
+	Intro     string `json:"intro"`
+	Status    string `json:"status"` // "pending", "approved", "denied"
 	CreatedAt int64  `json:"createdAt"`
 }
 
@@ -67,25 +69,25 @@ type AdminCredentials struct {
 }
 
 type Store struct {
-	mu          sync.RWMutex
-	keysPath    string
-	offlineDir  string
-	groupsDir   string
-	invitesPath string
-	roomsPath   string
-	adminPath   string
-	keys        map[string]string
-	invites     map[string]*InviteToken
-	rooms       map[string]*CallRoom
-	knocks      map[string]*GuestKnock
-	adminCreds  *AdminCredentials
+	mu           sync.RWMutex
+	keysPath     string
+	offlineDir   string
+	groupsDir    string
+	requestsPath string
+	roomsPath    string
+	adminPath    string
+	keys         map[string]string
+	requests     map[string]*RegistrationRequest
+	rooms        map[string]*CallRoom
+	knocks       map[string]*GuestKnock
+	adminCreds   *AdminCredentials
 }
 
 func NewStore(dataDir string) (*Store, error) {
 	keysPath := filepath.Join(dataDir, "keys.json")
 	offlineDir := filepath.Join(dataDir, "offline")
 	groupsDir := filepath.Join(dataDir, "groups")
-	invitesPath := filepath.Join(dataDir, "invites.json")
+	requestsPath := filepath.Join(dataDir, "requests.json")
 	roomsPath := filepath.Join(dataDir, "rooms.json")
 	adminPath := filepath.Join(dataDir, "admin.json")
 
@@ -97,22 +99,22 @@ func NewStore(dataDir string) (*Store, error) {
 	}
 
 	s := &Store{
-		keysPath:    keysPath,
-		offlineDir:  offlineDir,
-		groupsDir:   groupsDir,
-		invitesPath: invitesPath,
-		roomsPath:   roomsPath,
-		adminPath:   adminPath,
-		keys:        make(map[string]string),
-		invites:     make(map[string]*InviteToken),
-		rooms:       make(map[string]*CallRoom),
-		knocks:      make(map[string]*GuestKnock),
+		keysPath:     keysPath,
+		offlineDir:   offlineDir,
+		groupsDir:    groupsDir,
+		requestsPath: requestsPath,
+		roomsPath:    roomsPath,
+		adminPath:    adminPath,
+		keys:         make(map[string]string),
+		requests:     make(map[string]*RegistrationRequest),
+		rooms:        make(map[string]*CallRoom),
+		knocks:       make(map[string]*GuestKnock),
 	}
 
 	if err := s.loadKeys(); err != nil && !os.IsNotExist(err) {
 		return nil, err
 	}
-	if err := s.loadInvites(); err != nil && !os.IsNotExist(err) {
+	if err := s.loadRequests(); err != nil && !os.IsNotExist(err) {
 		return nil, err
 	}
 	if err := s.loadRooms(); err != nil && !os.IsNotExist(err) {
@@ -315,70 +317,113 @@ func (s *Store) DeleteGroup(id string) error {
 	return os.Remove(path)
 }
 
-func (s *Store) loadInvites() error {
-	data, err := os.ReadFile(s.invitesPath)
+func (s *Store) loadRequests() error {
+	data, err := os.ReadFile(s.requestsPath)
 	if err != nil {
 		return err
 	}
-	return json.Unmarshal(data, &s.invites)
+	return json.Unmarshal(data, &s.requests)
 }
 
-func (s *Store) saveInvites() error {
-	data, err := json.MarshalIndent(s.invites, "", "  ")
+func (s *Store) saveRequests() error {
+	data, err := json.MarshalIndent(s.requests, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.invitesPath, data, 0600)
+	return os.WriteFile(s.requestsPath, data, 0600)
 }
 
-// CreateInviteToken generates a random single-use invite token and persists it.
-func (s *Store) CreateInviteToken() (string, error) {
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	token := hex.EncodeToString(b)
+// CreateRegistrationRequest stores a pending registration request keyed by username.
+// If a denied request already exists for this username, it is overwritten.
+func (s *Store) CreateRegistrationRequest(username, pubkey, intro string) (*RegistrationRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.invites[token] = &InviteToken{
-		Token:     token,
-		Used:      false,
+
+	if existing, ok := s.keys[username]; ok && existing != pubkey {
+		return nil, ErrDuplicateUsername
+	}
+
+	if req, ok := s.requests[username]; ok && req.Status == "pending" {
+		if req.PubKey == pubkey {
+			return req, nil
+		}
+		return nil, ErrDuplicateUsername
+	}
+
+	req := &RegistrationRequest{
+		Username:  username,
+		PubKey:    pubkey,
+		Intro:     intro,
+		Status:    "pending",
 		CreatedAt: time.Now().UnixMilli(),
 	}
-	return token, s.saveInvites()
+	s.requests[username] = req
+	return req, s.saveRequests()
 }
 
-// ValidateAndConsumeToken marks a token used and returns true, or returns false if invalid/used.
-func (s *Store) ValidateAndConsumeToken(token string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	inv, ok := s.invites[token]
-	if !ok || inv.Used {
-		return false
-	}
-	inv.Used = true
-	_ = s.saveInvites()
-	return true
-}
-
-// ListInviteTokens returns a snapshot of all invite tokens.
-func (s *Store) ListInviteTokens() []*InviteToken {
+// GetRegistrationRequest returns the request for the given username, or nil.
+func (s *Store) GetRegistrationRequest(username string) *RegistrationRequest {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out := make([]*InviteToken, 0, len(s.invites))
-	for _, inv := range s.invites {
-		cp := *inv
-		out = append(out, &cp)
+	return s.requests[username]
+}
+
+// ListPendingRequests returns all requests with status "pending".
+func (s *Store) ListPendingRequests() []*RegistrationRequest {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []*RegistrationRequest
+	for _, req := range s.requests {
+		if req.Status == "pending" {
+			cp := *req
+			out = append(out, &cp)
+		}
 	}
 	return out
 }
 
-// ResetInvites clears all invite tokens.
-func (s *Store) ResetInvites() error {
+// ApproveRequest marks a pending request as approved and registers the user in keys.json.
+func (s *Store) ApproveRequest(username string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.invites = make(map[string]*InviteToken)
-	return s.saveInvites()
+
+	req, ok := s.requests[username]
+	if !ok || req.Status != "pending" {
+		return errors.New("no pending request for this user")
+	}
+
+	if existing, ok := s.keys[username]; ok && existing != req.PubKey {
+		return ErrDuplicateUsername
+	}
+	s.keys[username] = req.PubKey
+	if err := s.saveKeys(); err != nil {
+		return err
+	}
+
+	req.Status = "approved"
+	return s.saveRequests()
+}
+
+// DenyRequest marks a pending request as denied.
+func (s *Store) DenyRequest(username string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	req, ok := s.requests[username]
+	if !ok || req.Status != "pending" {
+		return errors.New("no pending request for this user")
+	}
+
+	req.Status = "denied"
+	return s.saveRequests()
+}
+
+// ResetRequests clears all registration requests.
+func (s *Store) ResetRequests() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.requests = make(map[string]*RegistrationRequest)
+	return s.saveRequests()
 }
 
 func (s *Store) QueueOffline(recipient, msgID, from, payload, nonce string, ts int64) error {

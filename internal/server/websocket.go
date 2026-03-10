@@ -133,7 +133,15 @@ func (c *Client) readPump(store *Store) {
 				PubKey   string `json:"pubkey"`
 			}
 			if json.Unmarshal(message, &m) == nil && m.Username != "" && m.PubKey != "" {
-				_ = store.Register(m.Username, m.PubKey)
+				// Only allow users already in keys.json (registered via HTTP).
+				if pk, ok := store.GetPubKey(m.Username); !ok || pk != m.PubKey {
+					errMsg, _ := json.Marshal(map[string]string{"type": "error", "message": "not registered"})
+					select {
+					case c.send <- errMsg:
+					default:
+					}
+					continue
+				}
 				c.username = m.Username
 
 				c.hub.mu.Lock()

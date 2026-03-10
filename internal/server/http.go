@@ -50,7 +50,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{"requireInvite": s.requireInvite})
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"requireApproval": s.requireApproval})
 }
 
 func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
@@ -60,9 +60,9 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Username    string `json:"username"`
-		PubKey      string `json:"pubkey"`
-		InviteToken string `json:"invite_token"`
+		Username string `json:"username"`
+		PubKey   string `json:"pubkey"`
+		Intro    string `json:"intro"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Bad request", http.StatusBadRequest)
@@ -80,18 +80,61 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// New registration: require invite token if configured.
-	if s.requireInvite {
-		if req.InviteToken == "" {
-			http.Error(w, "Invite token required", http.StatusForbidden)
+	// If approval is required, route through the request system.
+	if s.requireApproval {
+		existing := s.store.GetRegistrationRequest(req.Username)
+		if existing != nil && existing.PubKey == req.PubKey {
+			switch existing.Status {
+			case "pending":
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusAccepted)
+				_ = json.NewEncoder(w).Encode(map[string]string{"status": "pending"})
+				return
+			case "denied":
+				if req.Intro == "" {
+					// Status check — report denial.
+					http.Error(w, "Registration request was denied", http.StatusForbidden)
+					return
+				}
+				// Has new intro — allow re-request (fall through).
+			case "approved":
+				// Edge case: approved but re-registration shortcut missed it.
+				if err := s.store.Register(req.Username, req.PubKey); err == nil {
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+					return
+				}
+			}
+		}
+
+		// Username already taken by a different key.
+		if pk, ok := s.store.GetPubKey(req.Username); ok && pk != req.PubKey {
+			http.Error(w, "Username already taken. Choose another name.", http.StatusConflict)
 			return
 		}
-		if !s.store.ValidateAndConsumeToken(req.InviteToken) {
-			http.Error(w, "Invalid or already used invite token", http.StatusForbidden)
+		// Another pending request with a different key.
+		if existing != nil && existing.PubKey != req.PubKey && existing.Status == "pending" {
+			http.Error(w, "Username already requested by someone else.", http.StatusConflict)
 			return
 		}
+
+		// Create (or re-create after denial) the request.
+		_, err := s.store.CreateRegistrationRequest(req.Username, req.PubKey, req.Intro)
+		if err != nil {
+			if errors.Is(err, ErrDuplicateUsername) {
+				http.Error(w, "Username already taken. Choose another name.", http.StatusConflict)
+				return
+			}
+			http.Error(w, "Registration request failed", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "pending"})
+		return
 	}
 
+	// Open registration (no approval required).
 	if err := s.store.Register(req.Username, req.PubKey); err != nil {
 		if errors.Is(err, ErrDuplicateUsername) {
 			http.Error(w, "Username already taken. Choose another name.", http.StatusConflict)
@@ -272,36 +315,59 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 		_ = s.store.ResetUsers()
 		_ = s.store.ResetOffline()
 		_ = s.store.ResetGroups()
-		_ = s.store.ResetInvites()
+		_ = s.store.ResetRequests()
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "action": "reset-all"})
-	case "create-invite":
-		if r.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		token, err := s.store.CreateInviteToken()
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		_ = json.NewEncoder(w).Encode(map[string]string{"token": token})
-	case "list-invites":
+	case "list-requests":
 		if r.Method != http.MethodGet {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		tokens := s.store.ListInviteTokens()
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{"tokens": tokens})
-	case "reset-invites":
+		requests := s.store.ListPendingRequests()
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"requests": requests})
+	case "approve-request":
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		if err := s.store.ResetInvites(); err != nil {
+		var body struct {
+			Username string `json:"username"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "Bad request", http.StatusBadRequest)
+			return
+		}
+		if err := s.store.ApproveRequest(body.Username); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	case "deny-request":
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var body struct {
+			Username string `json:"username"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "Bad request", http.StatusBadRequest)
+			return
+		}
+		if err := s.store.DenyRequest(body.Username); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	case "reset-requests":
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := s.store.ResetRequests(); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "action": "reset-invites"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "action": "reset-requests"})
 	default:
 		http.NotFound(w, r)
 	}
@@ -592,7 +658,6 @@ func (s *Server) serveAdminPage(w http.ResponseWriter) {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Personal Chat Admin</title>
-<script src="/qrcode.min.js"></script>
 <script>(function(){var t=localStorage.getItem('war-chat-theme')||(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');document.documentElement.setAttribute('data-theme',t)})();</script>
 <style>
 :root{--bg:#08080f;--surface:#10101c;--surface-2:#181828;--border:#23233a;--accent:#7c6af6;--accent-hover:#6659e3;--danger:#ef4444;--danger-hover:#dc2626;--text:#f0f0fa;--text-2:#8b8bab;color-scheme:dark}
@@ -625,10 +690,19 @@ button:disabled{opacity:.45;cursor:not-allowed;transform:none}
 #msg:empty{display:none}
 #msg.error{border-color:rgba(239,68,68,.4);background:rgba(239,68,68,.08);color:#f87171}
 #msg.success{border-color:rgba(124,106,246,.35);background:rgba(124,106,246,.08);color:#a89bf8}
-.invite-out{font-size:0.8125rem;color:var(--text-2);background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:0.75rem;white-space:pre-wrap;word-break:break-all;font-family:ui-monospace,monospace}
-.invite-out:empty{display:none}
-#inviteQR{margin-top:0.75rem}
-#inviteQR:empty{display:none}
+.req-item{background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:0.875rem;margin-bottom:0.5rem}
+.req-item:last-child{margin-bottom:0}
+.req-top{display:flex;align-items:center;justify-content:space-between;gap:0.5rem;margin-bottom:0.375rem}
+.req-user{font-weight:600;font-size:0.9375rem}
+.req-time{font-size:0.75rem;color:var(--text-2)}
+.req-intro{font-size:0.8125rem;color:var(--text-2);margin-bottom:0.625rem;white-space:pre-wrap;word-break:break-word}
+.req-intro:empty{display:none}
+.req-actions{display:flex;gap:0.5rem}
+.req-actions button{width:auto;padding:0.375rem 0.875rem;font-size:0.8125rem;border-radius:8px}
+.btn-approve{background:#22c55e;color:#fff}
+.btn-approve:hover{background:#16a34a!important}
+.req-empty{font-size:0.8125rem;color:var(--text-2);text-align:center;padding:1rem 0}
+#requestsList:empty+.btn-ghost{margin-top:0}
 </style>
 </head>
 <body>
@@ -658,23 +732,21 @@ button:disabled{opacity:.45;cursor:not-allowed;transform:none}
     </div>
     <div class="danger-zone">
       <button data-action="reset-all" class="btn-danger">Reset everything</button>
-      <p>Clears users, offline messages, groups, and invites.</p>
+      <p>Clears users, offline messages, groups, and requests.</p>
     </div>
   </div>
   <div class="card">
     <div class="card-header">
-      <h2>Invite tokens</h2>
-      <p>When tokens exist, users must supply one to register.</p>
+      <h2>Registration requests</h2>
+      <p>New users must be approved before they can chat.</p>
     </div>
     <div class="card-body">
-      <button id="btnCreateInvite">Create token</button>
-      <button id="btnListInvites" class="btn-ghost">List tokens</button>
-      <div id="inviteOut" class="invite-out"></div>
-      <div id="inviteQR"></div>
+      <div id="requestsList"></div>
+      <button id="btnRefreshRequests" class="btn-ghost">Refresh</button>
     </div>
     <div class="danger-zone">
-      <button id="btnResetInvites" class="btn-danger">Reset all tokens</button>
-      <p>Removes all invite tokens from the server.</p>
+      <button id="btnResetRequests" class="btn-danger">Clear all requests</button>
+      <p>Removes all registration request history.</p>
     </div>
   </div>
 </main>
@@ -702,7 +774,7 @@ function showMsg(text,isError){
 document.querySelectorAll('button[data-action]').forEach(function(btn){
   btn.onclick=async function(){
     const action=btn.dataset.action;
-    if(action==='reset-all'&&!confirm('Reset all users, offline messages, groups, and invites?'))return;
+    if(action==='reset-all'&&!confirm('Reset all users, offline messages, groups, and requests?'))return;
     showMsg('Running…',false);
     try{
       const r=await fetch(base+'/'+action,{method:'POST'});
@@ -711,41 +783,58 @@ document.querySelectorAll('button[data-action]').forEach(function(btn){
     }catch(e){showMsg('Error: '+e.message,true);}
   };
 });
-document.getElementById('btnCreateInvite').onclick=async function(){
-  const out=document.getElementById('inviteOut');
-  clearEl('inviteQR');
-  out.textContent='Creating…';
+function timeAgo(ms){
+  var s=Math.floor((Date.now()-ms)/1000);
+  if(s<60)return 'just now';
+  var m=Math.floor(s/60);if(m<60)return m+'m ago';
+  var h=Math.floor(m/60);if(h<24)return h+'h ago';
+  return Math.floor(h/24)+'d ago';
+}
+function makeReqItem(req){
+  var div=document.createElement('div');div.className='req-item';
+  var top=document.createElement('div');top.className='req-top';
+  var name=document.createElement('span');name.className='req-user';name.textContent=req.username;
+  var time=document.createElement('span');time.className='req-time';time.textContent=timeAgo(req.createdAt);
+  top.appendChild(name);top.appendChild(time);div.appendChild(top);
+  if(req.intro){var intro=document.createElement('div');intro.className='req-intro';intro.textContent=req.intro;div.appendChild(intro);}
+  var acts=document.createElement('div');acts.className='req-actions';
+  var btnA=document.createElement('button');btnA.className='btn-approve';btnA.textContent='Approve';
+  btnA.onclick=async function(){btnA.disabled=true;btnA.textContent='…';
+    try{var r=await fetch(base+'/approve-request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:req.username})});
+      showMsg(r.ok?'Approved: '+req.username:'Error: '+r.status,!r.ok);loadRequests();
+    }catch(e){showMsg('Error: '+e.message,true);}};
+  var btnD=document.createElement('button');btnD.className='btn-danger';btnD.textContent='Deny';
+  btnD.onclick=async function(){if(!confirm('Deny registration for '+req.username+'?'))return;btnD.disabled=true;btnD.textContent='…';
+    try{var r=await fetch(base+'/deny-request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:req.username})});
+      showMsg(r.ok?'Denied: '+req.username:'Error: '+r.status,!r.ok);loadRequests();
+    }catch(e){showMsg('Error: '+e.message,true);}};
+  acts.appendChild(btnA);acts.appendChild(btnD);div.appendChild(acts);
+  return div;
+}
+async function loadRequests(){
+  var list=document.getElementById('requestsList');
+  if(!list)return;
+  list.replaceChildren();
+  var loading=document.createElement('div');loading.className='req-empty';loading.textContent='Loading…';list.appendChild(loading);
   try{
-    const r=await fetch(base+'/create-invite',{method:'POST'});
-    const j=await r.json().catch(function(){return{};});
-    if(r.ok){
-      const url=window.location.origin+'/?invite='+j.token+'#register';
-      out.textContent='Token: '+j.token+'\nURL: '+url;
-      const qrDiv=document.getElementById('inviteQR');
-      if(typeof QRCode!=='undefined'&&qrDiv){new QRCode(qrDiv,{text:url,width:180,height:180});}
-    }else{out.textContent='Error: '+r.status;}
-  }catch(e){out.textContent='Error: '+e.message;}
-};
-document.getElementById('btnListInvites').onclick=async function(){
-  clearEl('inviteQR');
-  const out=document.getElementById('inviteOut');
+    var r=await fetch(base+'/list-requests');
+    var j=await r.json().catch(function(){return{};});
+    var reqs=j.requests||[];
+    list.replaceChildren();
+    if(reqs.length===0){var empty=document.createElement('div');empty.className='req-empty';empty.textContent='No pending requests.';list.appendChild(empty);return;}
+    reqs.sort(function(a,b){return a.createdAt-b.createdAt;});
+    reqs.forEach(function(req){list.appendChild(makeReqItem(req));});
+  }catch(e){list.replaceChildren();var err=document.createElement('div');err.className='req-empty';err.textContent='Error: '+e.message;list.appendChild(err);}
+}
+loadRequests();
+document.getElementById('btnRefreshRequests').onclick=function(){loadRequests();};
+document.getElementById('btnResetRequests').onclick=async function(){
+  if(!confirm('Clear all registration requests?'))return;
   try{
-    const r=await fetch(base+'/list-invites');
-    const j=await r.json().catch(function(){return{};});
-    if(r.ok){
-      const tokens=j.tokens||[];
-      out.textContent=tokens.length===0?'No tokens.':tokens.map(function(t){return t.token+' — '+(t.used?'used':'available');}).join('\n');
-    }else{out.textContent='Error: '+r.status;}
-  }catch(e){out.textContent='Error: '+e.message;}
-};
-document.getElementById('btnResetInvites').onclick=async function(){
-  if(!confirm('Reset all invite tokens?'))return;
-  clearEl('inviteQR');
-  const out=document.getElementById('inviteOut');
-  try{
-    const r=await fetch(base+'/reset-invites',{method:'POST'});
-    out.textContent=r.ok?'All tokens reset.':'Error: '+r.status;
-  }catch(e){out.textContent='Error: '+e.message;}
+    var r=await fetch(base+'/reset-requests',{method:'POST'});
+    showMsg(r.ok?'All requests cleared.':'Error: '+r.status,!r.ok);
+    loadRequests();
+  }catch(e){showMsg('Error: '+e.message,true);}
 };
 </script>
 </body>

@@ -39,7 +39,7 @@ async function init() {
   await openDB();
 
   const config = await api.fetchConfig();
-  if (config) state.requireInvite = config.requireInvite === true;
+  if (config) state.requireApproval = config.requireApproval === true;
 
   const params = new URLSearchParams(window.location.search);
   const to = params.get('to') || params.get('u');
@@ -48,12 +48,7 @@ async function init() {
     params.delete('to');
     params.delete('u');
   }
-  const invite = params.get('invite');
-  if (invite) {
-    sessionStorage.setItem('war-chat-invite', invite);
-    params.delete('invite');
-  }
-  if (to || invite) {
+  if (to) {
     const cleanSearch = params.toString() ? '?' + params.toString() : '';
     history.replaceState(null, '', window.location.pathname + cleanSearch + (window.location.hash || ''));
   }
@@ -65,13 +60,36 @@ async function init() {
     }
   }
   if (state.keys && state.currentUsername) {
-    api.ensureRegisteredWithServer().catch((e) => console.warn('Ensure registered:', e));
-    migratePlainMessagesToEncrypted().catch((e) => console.warn('Message migration failed:', e));
+    // Verify the user is actually registered on the server.
+    try {
+      await api.ensureRegisteredWithServer();
+    } catch (e) {
+      if (e.message === 'pending_approval') {
+        // Save pending info so initSetup can show the waiting screen.
+        const pubkey = state.keys?.publicKey
+          ? await (await import('./crypto.js')).exportPubkeyToBase64(state.keys.publicKey)
+          : null;
+        if (pubkey) {
+          sessionStorage.setItem('war-chat-pending', JSON.stringify({
+            username: state.currentUsername, pubkey,
+          }));
+        }
+        state.currentUsername = null;
+        state.keys = null;
+        auth.setStoredUsername(null);
+        sessionStorage.removeItem('war-chat-passkey-session');
+      } else {
+        console.warn('Ensure registered:', e);
+      }
+    }
+    if (state.keys && state.currentUsername) {
+      migratePlainMessagesToEncrypted().catch((e) => console.warn('Message migration failed:', e));
 
-    const roomRedirect = sessionStorage.getItem('war-chat-room-redirect');
-    if (roomRedirect) {
-      sessionStorage.removeItem('war-chat-room-redirect');
-      window.location.hash = `#room/${roomRedirect}`;
+      const roomRedirect = sessionStorage.getItem('war-chat-room-redirect');
+      if (roomRedirect) {
+        sessionStorage.removeItem('war-chat-room-redirect');
+        window.location.hash = `#room/${roomRedirect}`;
+      }
     }
   }
 

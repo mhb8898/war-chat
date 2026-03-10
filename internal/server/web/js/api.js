@@ -34,13 +34,16 @@ export async function ensureRegisteredWithServer() {
   if (!currentUsername || !keys?.publicKey) return;
   const keysResp = await fetch(`${API_BASE}/keys/${encodeURIComponent(currentUsername)}`);
   if (keysResp.ok) return;
-  if (keysResp.status !== 404) return;
+  if (keysResp.status !== 404) throw new Error('Server error checking registration');
   const pubkey = await exportPubkeyToBase64(keys.publicKey);
   const regResp = await fetch(`${API_BASE}/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username: currentUsername, pubkey }),
   });
+  if (regResp.status === 202) {
+    throw new Error('pending_approval');
+  }
   if (regResp.status === 409) {
     throw new Error('Username was taken by another user. Sign in with a different account.');
   }
